@@ -2,3 +2,5 @@ streamlit
 faster-whisper
 ffmpeg-python
 google-genai
+pymupdf-layout
+pymupdf4llm

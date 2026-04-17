@@ -214,4 +214,3 @@ Return output in this exact structure:
 ---
 
 Now generate the schema.
-

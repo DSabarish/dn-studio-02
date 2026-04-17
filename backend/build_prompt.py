@@ -12,6 +12,22 @@ def _normalize_h1_headers(raw_h1_headers):
     return headers
 
 
+def _normalize_meetings(meetings):
+    normalized = []
+    for idx, meeting in enumerate(meetings or [], start=1):
+        transcript_path_obj = Path(meeting.get("transcript_path", ""))
+        meeting_date = str(meeting.get("meeting_date", "")).strip() or str(date.today())
+        normalized.append(
+            {
+                "meeting_number": idx,
+                "meeting_date": meeting_date,
+                "transcript_json_path": str(transcript_path_obj),
+                "transcript_json": _read_transcript_json(transcript_path_obj),
+            }
+        )
+    return normalized
+
+
 def _next_run_dir(base_run_dir: Path) -> Path:
     base_run_dir.mkdir(parents=True, exist_ok=True)
     existing = []
@@ -24,6 +40,11 @@ def _next_run_dir(base_run_dir: Path) -> Path:
     run_dir = base_run_dir / f"run_{next_idx:03d}"
     run_dir.mkdir(parents=True, exist_ok=True)
     return run_dir
+
+
+def create_new_run_folder(run_base_dir: Path) -> Path:
+    """Allocate the next `run/run_NNN` folder (used as the single session output directory)."""
+    return _next_run_dir(Path(run_base_dir))
 
 
 def _read_template(template_path: Path) -> str:
@@ -81,26 +102,12 @@ def build_bpd_schema_prompt(
     h1_headers,
     meetings,
     run_base_dir: Path,
+    run_dir: Path | None = None,
     template_path: Path = PROMPT_TEMPLATE_PATH,
 ):
     template = _read_template(template_path)
     h1_list = _normalize_h1_headers(h1_headers)
-
-    normalized_meetings = []
-    for idx, meeting in enumerate(meetings or [], start=1):
-        transcript_path_obj = Path(meeting.get("transcript_path", ""))
-        transcript_path = str(transcript_path_obj)
-        meeting_date = str(meeting.get("meeting_date", "")).strip()
-        if not meeting_date:
-            meeting_date = str(date.today())
-        normalized_meetings.append(
-            {
-                "meeting_number": idx,
-                "meeting_date": meeting_date,
-                "transcript_json_path": transcript_path,
-                "transcript_json": _read_transcript_json(transcript_path_obj),
-            }
-        )
+    normalized_meetings = _normalize_meetings(meetings)
 
     meeting_input_json = json.dumps(normalized_meetings, indent=2)
     h1_json = json.dumps(h1_list, indent=2)
@@ -110,7 +117,11 @@ def build_bpd_schema_prompt(
     prompt = prompt.replace("{{APPENDED_MEETING_INPUT}}", meeting_input_json)
     prompt = prompt.replace("{{H1_SECTIONS}}", h1_json)
 
-    run_dir = _next_run_dir(Path(run_base_dir))
+    if run_dir is None:
+        run_dir = _next_run_dir(Path(run_base_dir))
+    else:
+        run_dir = Path(run_dir).resolve()
+        run_dir.mkdir(parents=True, exist_ok=True)
     prompt_path = run_dir / "debug-prompt-schema.md"
     prompt_path.write_text(prompt, encoding="utf-8")
 
@@ -146,27 +157,13 @@ def build_bpd_pop_prompt(
     schema_json,
     meetings,
     run_base_dir: Path,
+    run_dir: Path | None = None,
     context_markdown: str = "",
     template_path: Path = POPULATE_TEMPLATE_PATH,
 ):
     """Fill `prompts/bpd/p2_populate.md` including `{{CONTEXT_INPUT_MD}}` from `run/context.md` when provided."""
     template = _read_template(template_path)
-
-    normalized_meetings = []
-    for idx, meeting in enumerate(meetings or [], start=1):
-        transcript_path_obj = Path(meeting.get("transcript_path", ""))
-        transcript_path = str(transcript_path_obj)
-        meeting_date = str(meeting.get("meeting_date", "")).strip()
-        if not meeting_date:
-            meeting_date = str(date.today())
-        normalized_meetings.append(
-            {
-                "meeting_number": idx,
-                "meeting_date": meeting_date,
-                "transcript_json_path": transcript_path,
-                "transcript_json": _read_transcript_json(transcript_path_obj),
-            }
-        )
+    normalized_meetings = _normalize_meetings(meetings)
 
     meeting_input_json = json.dumps(normalized_meetings, ensure_ascii=False, indent=2)
     schema_json_text = _normalize_schema_json(schema_json)
@@ -182,7 +179,11 @@ def build_bpd_pop_prompt(
         context_text,
     )
 
-    run_dir = _next_run_dir(Path(run_base_dir))
+    if run_dir is None:
+        run_dir = _next_run_dir(Path(run_base_dir))
+    else:
+        run_dir = Path(run_dir).resolve()
+        run_dir.mkdir(parents=True, exist_ok=True)
     prompt_path = run_dir / "final-content-populate-prompt.md"
     prompt_path.write_text(prompt, encoding="utf-8")
 

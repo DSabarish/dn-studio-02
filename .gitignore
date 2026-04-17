@@ -8,14 +8,13 @@ __pycache__/
 .pyre/
 .hypothesis/
 
-
 # Virtual environments
 .venv/
 venv/
 env/
 ENV/
 
-# Build/package artifacts
+# Build / package artifacts
 build/
 dist/
 *.egg-info/
@@ -28,7 +27,7 @@ pip-wheel-metadata/
 !.env.example
 *.local
 
-# Streamlit/local app state
+# Streamlit (keep config; ignore secrets)
 .streamlit/secrets.toml
 
 # Generated project outputs
@@ -38,18 +37,36 @@ templates/node_modules/
 templates/package-lock.json
 templates/package.json
 
+# zip_it.py backups & Claude bundles (large)
+code_backup/
+
+# Local smoke-test / scratch outputs
+test_vertex_out.json
+c.json
+
 # Logs and temp files
 *.log
 *.tmp
 tmp/
 temp/
 
-# IDE/editor files
+# Test / coverage
+.coverage
+coverage.xml
+htmlcov/
+.tox/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# IDE / editor
 .vscode/
 .idea/
 *.swp
 *.swo
+*~
 
 # OS files
 .DS_Store
 Thumbs.db
+desktop.ini

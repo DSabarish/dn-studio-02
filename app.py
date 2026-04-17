@@ -1,5 +1,4 @@
 import io
-import importlib.util
 import json
 import subprocess
 import tempfile
@@ -9,8 +8,8 @@ from datetime import date, datetime
 from pathlib import Path
 
 import streamlit as st
-from google import genai
-from google.genai import types
+from backend import build_context, build_prompt, transcriptions
+from backend.simple_llm import run_prompt_file, run_prompt_text
 
 MAX_FILE_SIZE_MB = 2048  # App-side safety limit per file (2 GB)
 MAX_PARALLEL_WORKERS = 4
@@ -18,9 +17,6 @@ MAX_DOC_FILES = 20
 RUN_DIR = Path(__file__).resolve().parent / "run"
 TRANSCRIPTS_DIR = RUN_DIR / "transcripts"
 DOCS_INPUT_DIR = RUN_DIR / "docs_input"
-BPD_MODEL_NAME = "gemini-2.5-flash"
-BPD_PROJECT_ID = "dn-studio-01"
-BPD_LOCATION = "asia-south1"
 DEFAULT_BPD_H1_HEADERS = "\n".join(
     [
         "Business Process Overview",
@@ -31,122 +27,6 @@ DEFAULT_BPD_H1_HEADERS = "\n".join(
     ]
 )
 
-
-def _extract_first_json_object(text: str) -> str:
-    """
-    Best-effort extraction of the first valid JSON object from a text blob.
-    Handles extra commentary or multiple code fences by scanning for the first
-    parseable {...} block.
-    """
-    if not text:
-        raise ValueError("Empty response when JSON was expected.")
-
-    # Quick clean-up for common fenced formats.
-    cleaned = text.strip()
-    if cleaned.startswith("```"):
-        cleaned = cleaned.strip("`").strip()
-        if cleaned.lower().startswith("json"):
-            cleaned = cleaned[4:].strip()
-
-    # If direct parse works, return.
-    try:
-        json.loads(cleaned)
-        return cleaned
-    except Exception:
-        pass
-
-    # Fallback: search between first '{' and successive '}' from the end.
-    first = cleaned.find("{")
-    last = cleaned.rfind("}")
-    while first != -1 and last != -1 and last > first:
-        candidate = cleaned[first : last + 1]
-        try:
-            json.loads(candidate)
-            return candidate
-        except Exception:
-            last = cleaned.rfind("}", 0, last)
-
-    raise ValueError("Could not extract valid JSON object from model response.")
-
-
-def _generate_model_text(
-    prompt_text: str,
-    temperature: float,
-    max_output_tokens: int,
-) -> str:
-    client = genai.Client(
-        vertexai=True,
-        project=BPD_PROJECT_ID,
-        location=BPD_LOCATION,
-    )
-    response = client.models.generate_content(
-        model=BPD_MODEL_NAME,
-        contents=[(prompt_text or "").strip()],
-        config=types.GenerateContentConfig(
-            temperature=float(temperature),
-            max_output_tokens=int(max_output_tokens),
-            response_mime_type="application/json",
-        ),
-    )
-
-    response_text = (response.text or "").strip()
-    if response_text:
-        return response_text
-
-    chunks = []
-    for candidate in getattr(response, "candidates", []) or []:
-        content = getattr(candidate, "content", None)
-        for part in getattr(content, "parts", []) or []:
-            part_text = getattr(part, "text", None)
-            if part_text:
-                chunks.append(part_text.strip())
-    return "\n".join(c for c in chunks if c).strip()
-
-
-def _repair_json_with_model(raw_text: str, max_output_tokens: int) -> str:
-    repair_prompt = (
-        "Convert the following into STRICT valid JSON only.\n"
-        "No markdown, no prose, no code fences.\n\n"
-        "CONTENT:\n"
-        f"{raw_text}"
-    )
-    repaired_text = _generate_model_text(
-        prompt_text=repair_prompt,
-        temperature=0.0,
-        max_output_tokens=max_output_tokens,
-    )
-    if not repaired_text:
-        raise ValueError("JSON repair step returned empty output.")
-    return repaired_text
-
-
-def load_transcription_module():
-    module_path = Path(__file__).resolve().parent / "backend" / "transcriptions.py"
-    spec = importlib.util.spec_from_file_location("text_transcriptions", module_path)
-    if spec is None or spec.loader is None:
-        raise RuntimeError("Could not load transcription module.")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-def load_context_builder_module():
-    module_path = Path(__file__).resolve().parent / "backend" / "build_context.py"
-    spec = importlib.util.spec_from_file_location("build_context", module_path)
-    if spec is None or spec.loader is None:
-        raise RuntimeError("Could not load context builder module.")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-def load_prompt_builder_module():
-    module_path = Path(__file__).resolve().parent / "build_prompt.py"
-    spec = importlib.util.spec_from_file_location("build_prompt", module_path)
-    if spec is None or spec.loader is None:
-        raise RuntimeError("Could not load prompt builder module.")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
 
 def sanitize_stem(filename: str) -> str:
     stem = Path(filename).stem.strip()
@@ -259,97 +139,27 @@ def generate_schema_json(
     temperature: float = 0.2,
     max_output_tokens: int = 8192,
 ) -> str:
-    response_text = _generate_model_text(
+    return run_prompt_text(
         prompt_text=prompt_text,
         temperature=temperature,
         max_output_tokens=max_output_tokens,
     )
-    if not response_text:
-        raise ValueError(
-            "Model returned an empty response when JSON was expected. "
-            "Try reducing input size or increasing max output tokens."
-        )
-    try:
-        json_payload = _extract_first_json_object(response_text)
-        parsed = json.loads(json_payload)
-    except Exception:
-        repaired_text = _repair_json_with_model(response_text, max_output_tokens)
-        json_payload = _extract_first_json_object(repaired_text)
-        parsed = json.loads(json_payload)
-    return json.dumps(parsed, ensure_ascii=False, indent=2)
 
 
-def generate_r2_populated_from_prompt(
-    p2_prompt: str,
-    appended_meeting,
-    schema_json,
-    business_context: str,
-    context_input_md: str = "",
-    temperature: float = 0.2,
-    max_output_tokens: int = 30000,
-) -> str:
-    """
-    Build populate prompt from explicit inputs and return pretty-printed JSON.
-    Uses the same model call and JSON extraction/repair pattern as schema generation.
-    """
-    if isinstance(appended_meeting, str):
-        appended_meeting_text = appended_meeting.strip()
-        if not appended_meeting_text:
-            raise ValueError("Meeting input cannot be empty.")
-        try:
-            appended_meeting_parsed = json.loads(appended_meeting_text)
-        except json.JSONDecodeError as exc:
-            raise ValueError(f"Invalid meeting input JSON: {exc}") from exc
-    else:
-        appended_meeting_parsed = appended_meeting
-    appended_meeting_text = json.dumps(
-        appended_meeting_parsed, ensure_ascii=False, indent=2
-    )
-
-    if isinstance(schema_json, str):
-        schema_json_text_raw = schema_json.strip()
-        if not schema_json_text_raw:
-            raise ValueError("Schema JSON cannot be empty.")
-        try:
-            schema_parsed = json.loads(schema_json_text_raw)
-        except json.JSONDecodeError as exc:
-            raise ValueError(f"Invalid schema JSON: {exc}") from exc
-    else:
-        schema_parsed = schema_json
-    schema_json_text = json.dumps(schema_parsed, ensure_ascii=False, indent=2)
-
-    prompt_text = (p2_prompt or "").strip()
-    if not prompt_text:
-        raise ValueError("p2_prompt cannot be empty.")
-    prompt_text = prompt_text.replace("{{BUSINESS_CONTEXT}}", (business_context or "").strip())
-    prompt_text = prompt_text.replace("{{SCHEMA_JSON}}", schema_json_text)
-    prompt_text = prompt_text.replace("{{APPENDED_MEETING_INPUT}}", appended_meeting_text)
-    prompt_text = prompt_text.replace("{{CONTEXT_INPUT_MD}}", (context_input_md or "").strip())
-
-    response_text = _generate_model_text(
-        prompt_text=prompt_text,
-        temperature=temperature,
-        max_output_tokens=max_output_tokens,
-    )
-    if not response_text:
-        raise ValueError(
-            "Model returned an empty response when JSON was expected. "
-            "Try reducing input size or increasing max output tokens."
-        )
-    try:
-        json_payload = _extract_first_json_object(response_text)
-        parsed = json.loads(json_payload)
-    except Exception:
-        repaired_text = _repair_json_with_model(response_text, max_output_tokens)
-        json_payload = _extract_first_json_object(repaired_text)
-        parsed = json.loads(json_payload)
-    return json.dumps(parsed, ensure_ascii=False, indent=2)
+def session_run_dir_path() -> Path | None:
+    raw = str(st.session_state.get("bpd_session_run_dir", "")).strip()
+    if not raw:
+        return None
+    p = Path(raw)
+    return p.resolve() if p.is_dir() else None
 
 
 def list_meeting_transcripts():
-    TRANSCRIPTS_DIR.mkdir(parents=True, exist_ok=True)
-    json_files = sorted(TRANSCRIPTS_DIR.glob("*.json"))
-    txt_files = sorted(TRANSCRIPTS_DIR.glob("*.txt"))
+    base = session_run_dir_path()
+    tdir = (base / "transcripts") if base else TRANSCRIPTS_DIR
+    tdir.mkdir(parents=True, exist_ok=True)
+    json_files = sorted(tdir.glob("*.json"))
+    txt_files = sorted(tdir.glob("*.txt"))
     return json_files if json_files else txt_files
 
 
@@ -357,48 +167,68 @@ def list_meeting_transcripts():
 st.set_page_config(page_title="Lite Transcription", layout="wide")
 st.title("DN Studio")
 
-if "outputs" not in st.session_state:
-    st.session_state.outputs = []
-if "meeting_records" not in st.session_state:
-    st.session_state.meeting_records = []
-if "meeting_dates" not in st.session_state:
-    st.session_state.meeting_dates = {}
-if "bpd_prompt_result" not in st.session_state:
-    st.session_state.bpd_prompt_result = None
-if "bpd_schema_json_output" not in st.session_state:
-    st.session_state.bpd_schema_json_output = ""
-if "bpd_business_context" not in st.session_state:
-    st.session_state.bpd_business_context = ""
-if "bpd_schema_temperature" not in st.session_state:
-    st.session_state.bpd_schema_temperature = 0.2
-if "bpd_schema_max_tokens" not in st.session_state:
-    st.session_state.bpd_schema_max_tokens = 8192
-if "bpd_r2_pop_temperature" not in st.session_state:
-    st.session_state.bpd_r2_pop_temperature = 0.2
-if "bpd_r2_pop_max_tokens" not in st.session_state:
-    st.session_state.bpd_r2_pop_max_tokens = 30000
-if "bpd_populate_prompt_result" not in st.session_state:
-    st.session_state.bpd_populate_prompt_result = None
+defaults = {
+    "outputs": [],
+    "meeting_records": [],
+    "meeting_dates": {},
+    "bpd_prompt_result": None,
+    "bpd_schema_json_output": "",
+    "bpd_business_context": "",
+    "bpd_schema_temperature": 0.2,
+    "bpd_schema_max_tokens": 8192,
+    "bpd_r2_pop_temperature": 0.2,
+    "bpd_r2_pop_max_tokens": 65000,
+    "bpd_populate_prompt_result": None,
+    "active_run_dir": "",
+    "bpd_session_run_dir": "",
+}
+for key, value in defaults.items():
+    if key not in st.session_state:
+        st.session_state[key] = value
 if "bpd_pop_schema_json_editable" not in st.session_state:
     st.session_state.bpd_pop_schema_json_editable = st.session_state.bpd_schema_json_output or ""
 if "bpd_pop_business_context_editable" not in st.session_state:
     st.session_state.bpd_pop_business_context_editable = st.session_state.bpd_business_context or ""
 
+with st.container(border=True):
+    st.subheader("Session run folder")
+    st.caption(
+        "Create one folder per session. Transcripts, prompts, schema, context, and exports are written **only** under that path."
+    )
+    s1, s2 = st.columns([4, 1])
+    with s1:
+        cur = session_run_dir_path()
+        if cur:
+            st.success(f"**Active folder:** `{cur}`")
+        else:
+            st.warning(
+                "No session folder yet — click **New run folder** before processing files or building prompts."
+            )
+    with s2:
+        if st.button(
+            "New run folder",
+            type="primary",
+            help="Creates run/run_NNN and sets it as the only output directory for this session.",
+        ):
+            new_run = build_prompt.create_new_run_folder(RUN_DIR)
+            st.session_state.bpd_session_run_dir = str(new_run)
+            st.session_state.active_run_dir = str(new_run)
+            st.rerun()
+
 left_col, schema_col, context_col = st.columns(3)
 
 with left_col:
     with st.container(border=True):
-        st.subheader("Meeting Recordings/Transcripts Uploader")
+        st.subheader("Meeting Uploads")
         uploaded_files = st.file_uploader(
-            "Drag and drop audio/video files (or transcript .txt)",
+            "Upload audio/video/transcript files",
             accept_multiple_files=True,
             type=["mp3", "wav", "m4a", "ogg", "flac", "aac", "mp4", "mov", "mkv", "webm", "avi", "txt", "json"],
             key="meeting_files_uploader",
         )
-        st.info(f"Parallel transcription is enabled (up to {MAX_PARALLEL_WORKERS} files at once).")
 
         if uploaded_files:
-            st.caption("Add meeting dates for uploaded recordings.")
+            st.caption("Set meeting dates")
             for idx, uploaded_file in enumerate(uploaded_files, start=1):
                 key = f"meeting_date_upload_{uploaded_file.name}_{idx}"
                 selected_date = st.date_input(
@@ -409,166 +239,170 @@ with left_col:
                 st.session_state.meeting_dates[key] = selected_date
 
         if st.button("Process Files", type="primary", disabled=not uploaded_files):
-            RUN_DIR.mkdir(parents=True, exist_ok=True)
-            TRANSCRIPTS_DIR.mkdir(parents=True, exist_ok=True)
-            transcription_module = load_transcription_module()
-            transcribe_fn = transcription_module.transcribe
-            outputs = []
-            errors = []
-            staged_files = []
-            meeting_records = []
-
-            progress = st.progress(0)
-            status = st.empty()
-            parallel_status = st.empty()
-
-            total = len(uploaded_files or [])
-            for idx, uploaded_file in enumerate(uploaded_files or [], start=1):
-                status.write(f"Staging {idx}/{total}: `{uploaded_file.name}`")
-                try:
-                    suffix = Path(uploaded_file.name).suffix.lower()
-                    if suffix == ".txt":
-                        uploaded_file.seek(0)
-                        transcript_text = uploaded_file.read().decode("utf-8", errors="ignore").strip()
-                        file_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                        json_name = f"{sanitize_stem(uploaded_file.name)}_{file_timestamp}.json"
-                        transcript_payload = {
-                            "file_metadata": {
-                                "file_name": json_name,
-                                "source_video": uploaded_file.name,
-                                "language": "unknown",
-                                "duration_seconds": 0.0,
-                            },
-                            "transcript": [
-                                {
-                                    "start_time": "00:00:00.000",
-                                    "end_time": "00:00:00.000",
-                                    "speaker": "unknown",
-                                    "text": transcript_text,
-                                }
-                            ]
-                            if transcript_text
-                            else [],
-                        }
-                        json_body = json.dumps(transcript_payload, ensure_ascii=False, indent=2)
-                        json_path = TRANSCRIPTS_DIR / json_name
-                        json_path.write_text(json_body, encoding="utf-8")
-                        outputs.append(
-                            {
-                                "name": uploaded_file.name,
-                                "language": "unknown",
-                                "duration": 0,
-                                "json_text": json_body,
-                                "json_name": json_name,
-                            }
-                        )
-                        meeting_date_key = f"meeting_date_upload_{uploaded_file.name}_{idx}"
-                        meeting_records.append(
-                            {
-                                "meeting_number": idx,
-                                "meeting_date": str(
-                                    st.session_state.meeting_dates.get(meeting_date_key, date.today())
-                                ),
-                                "transcript_path": str(json_path),
-                            }
-                        )
-                    elif suffix == ".json":
-                        # Accept an already-prepared transcript JSON as-is.
-                        saved_json_path = save_uploaded_to_folder(uploaded_file, TRANSCRIPTS_DIR)
-                        try:
-                            json_body = saved_json_path.read_text(encoding="utf-8")
-                            # Validate it's at least parseable JSON.
-                            json.loads(json_body)
-                        except Exception as exc:
-                            raise ValueError(f"Invalid JSON transcript file: {exc}") from exc
-
-                        outputs.append(
-                            {
-                                "name": uploaded_file.name,
-                                "language": "unknown",
-                                "duration": 0,
-                                "json_text": json_body,
-                                "json_name": saved_json_path.name,
-                            }
-                        )
-                        meeting_date_key = f"meeting_date_upload_{uploaded_file.name}_{idx}"
-                        meeting_records.append(
-                            {
-                                "meeting_number": idx,
-                                "meeting_date": str(
-                                    st.session_state.meeting_dates.get(meeting_date_key, date.today())
-                                ),
-                                "transcript_path": str(saved_json_path),
-                            }
-                        )
-                    else:
-                        staged_files.append(stage_uploaded_file(uploaded_file))
-                except Exception as exc:
-                    errors.append(f"{uploaded_file.name}: {exc}")
-                progress.progress(idx / total)
-
-            if staged_files:
-                workers = max(1, min(MAX_PARALLEL_WORKERS, len(staged_files)))
-                completed = 0
-                parallel_status.info(
-                    f"Parallel transcription running with {workers} worker(s) for {len(staged_files)} file(s)."
-                )
-                with ThreadPoolExecutor(max_workers=workers) as executor:
-                    futures = {
-                        executor.submit(process_staged_file, name, path, transcribe_fn): (name, idx)
-                        for idx, (name, path) in enumerate(staged_files, start=1)
-                    }
-                    for future in as_completed(futures):
-                        name, meeting_idx = futures[future]
-                        completed += 1
-                        status.write(f"Transcribing {completed}/{len(staged_files)}: `{name}`")
-                        remaining = len(staged_files) - completed
-                        parallel_status.info(
-                            f"Parallel mode: {workers} worker(s) | Completed: {completed} | Remaining: {remaining}"
-                        )
-                        try:
-                            processed = future.result()
-                        except Exception as exc:
-                            errors.append(f"{name}: {exc}")
-                            continue
-
-                        file_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                        json_name = f"{sanitize_stem(name)}_{file_timestamp}.json"
-                        transcription_payload = build_transcription_json_payload(
-                            source_video=name,
-                            language=processed["language"],
-                            duration=processed["duration"],
-                            segments=processed.get("segments", []),
-                            file_name=json_name,
-                        )
-                        json_body = json.dumps(transcription_payload, ensure_ascii=False, indent=2)
-                        processed["json_name"] = json_name
-                        processed["json_text"] = json_body
-                        json_path = TRANSCRIPTS_DIR / json_name
-                        json_path.write_text(json_body, encoding="utf-8")
-                        meeting_date_key = f"meeting_date_upload_{name}_{meeting_idx}"
-                        meeting_records.append(
-                            {
-                                "meeting_number": meeting_idx,
-                                "meeting_date": str(st.session_state.meeting_dates.get(meeting_date_key, date.today())),
-                                "transcript_path": str(json_path),
-                            }
-                        )
-                        outputs.append(processed)
-                        progress.progress((total + completed) / (total + len(staged_files)))
-
-            if errors:
-                status.warning("Completed with some file errors.")
-                parallel_status.warning("Parallel transcription finished with some errors.")
-                for err in errors:
-                    st.error(err)
+            session_base = session_run_dir_path()
+            if not session_base:
+                st.error("Create a session run folder first (see **Session run folder** at the top).")
             else:
-                status.success("Transcription complete.")
-                parallel_status.success("Parallel transcription finished successfully.")
-            st.session_state.outputs = outputs
-            st.session_state.meeting_records = sorted(
-                meeting_records, key=lambda x: x["meeting_number"]
-            )
+                RUN_DIR.mkdir(parents=True, exist_ok=True)
+                transcripts_dir = session_base / "transcripts"
+                transcripts_dir.mkdir(parents=True, exist_ok=True)
+                transcribe_fn = transcriptions.transcribe
+                outputs = []
+                errors = []
+                staged_files = []
+                meeting_records = []
+
+                progress = st.progress(0)
+                status = st.empty()
+                parallel_status = st.empty()
+
+                total = len(uploaded_files or [])
+                for idx, uploaded_file in enumerate(uploaded_files or [], start=1):
+                    status.write(f"Staging {idx}/{total}: `{uploaded_file.name}`")
+                    try:
+                        suffix = Path(uploaded_file.name).suffix.lower()
+                        if suffix == ".txt":
+                            uploaded_file.seek(0)
+                            transcript_text = uploaded_file.read().decode("utf-8", errors="ignore").strip()
+                            file_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                            json_name = f"{sanitize_stem(uploaded_file.name)}_{file_timestamp}.json"
+                            transcript_payload = {
+                                "file_metadata": {
+                                    "file_name": json_name,
+                                    "source_video": uploaded_file.name,
+                                    "language": "unknown",
+                                    "duration_seconds": 0.0,
+                                },
+                                "transcript": [
+                                    {
+                                        "start_time": "00:00:00.000",
+                                        "end_time": "00:00:00.000",
+                                        "speaker": "unknown",
+                                        "text": transcript_text,
+                                    }
+                                ]
+                                if transcript_text
+                                else [],
+                            }
+                            json_body = json.dumps(transcript_payload, ensure_ascii=False, indent=2)
+                            json_path = transcripts_dir / json_name
+                            json_path.write_text(json_body, encoding="utf-8")
+                            outputs.append(
+                                {
+                                    "name": uploaded_file.name,
+                                    "language": "unknown",
+                                    "duration": 0,
+                                    "json_text": json_body,
+                                    "json_name": json_name,
+                                }
+                            )
+                            meeting_date_key = f"meeting_date_upload_{uploaded_file.name}_{idx}"
+                            meeting_records.append(
+                                {
+                                    "meeting_number": idx,
+                                    "meeting_date": str(
+                                        st.session_state.meeting_dates.get(meeting_date_key, date.today())
+                                    ),
+                                    "transcript_path": str(json_path),
+                                }
+                            )
+                        elif suffix == ".json":
+                            # Accept an already-prepared transcript JSON as-is.
+                            saved_json_path = save_uploaded_to_folder(uploaded_file, transcripts_dir)
+                            try:
+                                json_body = saved_json_path.read_text(encoding="utf-8")
+                                # Validate it's at least parseable JSON.
+                                json.loads(json_body)
+                            except Exception as exc:
+                                raise ValueError(f"Invalid JSON transcript file: {exc}") from exc
+
+                            outputs.append(
+                                {
+                                    "name": uploaded_file.name,
+                                    "language": "unknown",
+                                    "duration": 0,
+                                    "json_text": json_body,
+                                    "json_name": saved_json_path.name,
+                                }
+                            )
+                            meeting_date_key = f"meeting_date_upload_{uploaded_file.name}_{idx}"
+                            meeting_records.append(
+                                {
+                                    "meeting_number": idx,
+                                    "meeting_date": str(
+                                        st.session_state.meeting_dates.get(meeting_date_key, date.today())
+                                    ),
+                                    "transcript_path": str(saved_json_path),
+                                }
+                            )
+                        else:
+                            staged_files.append(stage_uploaded_file(uploaded_file))
+                    except Exception as exc:
+                        errors.append(f"{uploaded_file.name}: {exc}")
+                    progress.progress(idx / total)
+
+                if staged_files:
+                    workers = max(1, min(MAX_PARALLEL_WORKERS, len(staged_files)))
+                    completed = 0
+                    parallel_status.info(
+                        f"Parallel transcription running with {workers} worker(s) for {len(staged_files)} file(s)."
+                    )
+                    with ThreadPoolExecutor(max_workers=workers) as executor:
+                        futures = {
+                            executor.submit(process_staged_file, name, path, transcribe_fn): (name, idx)
+                            for idx, (name, path) in enumerate(staged_files, start=1)
+                        }
+                        for future in as_completed(futures):
+                            name, meeting_idx = futures[future]
+                            completed += 1
+                            status.write(f"Transcribing {completed}/{len(staged_files)}: `{name}`")
+                            remaining = len(staged_files) - completed
+                            parallel_status.info(
+                                f"Parallel mode: {workers} worker(s) | Completed: {completed} | Remaining: {remaining}"
+                            )
+                            try:
+                                processed = future.result()
+                            except Exception as exc:
+                                errors.append(f"{name}: {exc}")
+                                continue
+
+                            file_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                            json_name = f"{sanitize_stem(name)}_{file_timestamp}.json"
+                            transcription_payload = build_transcription_json_payload(
+                                source_video=name,
+                                language=processed["language"],
+                                duration=processed["duration"],
+                                segments=processed.get("segments", []),
+                                file_name=json_name,
+                            )
+                            json_body = json.dumps(transcription_payload, ensure_ascii=False, indent=2)
+                            processed["json_name"] = json_name
+                            processed["json_text"] = json_body
+                            json_path = transcripts_dir / json_name
+                            json_path.write_text(json_body, encoding="utf-8")
+                            meeting_date_key = f"meeting_date_upload_{name}_{meeting_idx}"
+                            meeting_records.append(
+                                {
+                                    "meeting_number": meeting_idx,
+                                    "meeting_date": str(st.session_state.meeting_dates.get(meeting_date_key, date.today())),
+                                    "transcript_path": str(json_path),
+                                }
+                            )
+                            outputs.append(processed)
+                            progress.progress((total + completed) / (total + len(staged_files)))
+
+                if errors:
+                    status.warning("Completed with some file errors.")
+                    parallel_status.warning("Parallel transcription finished with some errors.")
+                    for err in errors:
+                        st.error(err)
+                else:
+                    status.success("Transcription complete.")
+                    parallel_status.success("Parallel transcription finished successfully.")
+                st.session_state.outputs = outputs
+                st.session_state.meeting_records = sorted(
+                    meeting_records, key=lambda x: x["meeting_number"]
+                )
 
         if st.session_state.outputs:
             st.subheader("Downloads")
@@ -590,7 +424,7 @@ with left_col:
 
 with schema_col:
     with st.container(border=True):
-        st.subheader("BPD Schema Builder")
+        st.subheader(" Builder")
 
         document_type = st.radio(
             "Document Type",
@@ -599,10 +433,9 @@ with schema_col:
         )
 
         if document_type == "BPD":
-            st.markdown("### BPD Schema Prompt Builder")
             business_context = st.text_area(
                 "Business Context",
-                placeholder="Enter business context used in BPD schema design...",
+                placeholder="Enter business context...",
                 height=120,
             )
             h1_headers_raw = st.text_area(
@@ -613,43 +446,46 @@ with schema_col:
             )
 
             if st.session_state.meeting_records:
-                st.caption("Meeting inputs use dates and transcript JSON from uploaded recordings.")
-                for meeting in st.session_state.meeting_records:
-                    st.write(
-                        f"Meeting {meeting['meeting_number']} | Date: {meeting['meeting_date']} | "
-                        f"JSON: {Path(meeting['transcript_path']).name}"
-                    )
+                with st.expander("Meeting inputs", expanded=False):
+                    for meeting in st.session_state.meeting_records:
+                        st.write(
+                            f"Meeting {meeting['meeting_number']} | Date: {meeting['meeting_date']} | "
+                            f"JSON: {Path(meeting['transcript_path']).name}"
+                        )
             else:
-                st.warning("Process meeting recordings first to prepare meeting JSON inputs.")
+                st.warning("Process files first.")
 
-            if st.button("final-schema-prompt", type="primary"):
+            if st.button("Build schema prompt", type="primary"):
                 h1_headers = [line.strip() for line in h1_headers_raw.splitlines() if line.strip()]
-                if not h1_headers:
+                session_base = session_run_dir_path()
+                if not session_base:
+                    st.error("Create a session run folder first (see **Session run folder** at the top).")
+                elif not h1_headers:
                     st.error("Please add at least one H1 header for BPD.")
                 elif not st.session_state.meeting_records:
                     st.error("No meeting recordings processed yet.")
                 else:
-                    prompt_builder = load_prompt_builder_module()
-                    prompt_result = prompt_builder.build_bpd_schema_prompt(
+                    prompt_result = build_prompt.build_bpd_schema_prompt(
                         business_context=business_context,
                         h1_headers=h1_headers,
                         meetings=st.session_state.meeting_records,
                         run_base_dir=RUN_DIR,
+                        run_dir=session_base,
                     )
                     st.session_state.bpd_prompt_result = prompt_result
+                    st.session_state.active_run_dir = prompt_result.get("run_dir", "")
                     st.session_state.bpd_business_context = business_context
                     st.session_state.bpd_pop_business_context_editable = business_context
                     st.session_state.bpd_schema_json_output = ""
-                    st.success(f"Exported prompt schema: {prompt_result['prompt_path']}")
-                    st.caption(f"Saved meeting json: {prompt_result['meeting_json_path']}")
+                    st.success(f"Saved: {prompt_result['prompt_path']}")
                     st.download_button(
-                        label="Download bpd-system-prompt-debugger.md",
+                        label="Download schema prompt",
                         data=prompt_result["prompt"],
                         file_name="bpd-system-prompt-debugger.md",
                         mime="text/markdown",
                     )
 
-            st.caption("Schema generation settings")
+            st.caption("Model settings")
             bpd_schema_temperature = st.number_input(
                 "Temperature",
                 min_value=0.0,
@@ -680,6 +516,7 @@ with schema_col:
                     )
                     run_dir = Path(prompt_result.get("run_dir", RUN_DIR))
                     run_dir.mkdir(parents=True, exist_ok=True)
+                    st.session_state.active_run_dir = str(run_dir)
                     schema_path = run_dir / "r1_schema.json"
                     schema_path.write_text(generated_json, encoding="utf-8")
                     st.session_state.bpd_schema_json_output = generated_json
@@ -695,106 +532,106 @@ with schema_col:
                     st.error(f"Failed to build schema JSON: {exc}")
 
             if not can_build_schema:
-                st.info("final-schema-prompt first before building schema.")
+                st.info("Build schema prompt first.")
 
 with context_col:
     with st.container(border=True):
         st.subheader("Context Builder")
 
         document_files = st.file_uploader(
-            "Drag and drop multiple input documents",
+            "Upload input documents",
             accept_multiple_files=True,
             type=["pdf", "docx", "txt", "md", "png", "jpg", "jpeg"],
             key="docs_uploader",
         )
 
         if st.button(f"Build context.md (max {MAX_DOC_FILES} files)", disabled=not document_files):
-            RUN_DIR.mkdir(parents=True, exist_ok=True)
-            DOCS_INPUT_DIR.mkdir(parents=True, exist_ok=True)
+            session_base = session_run_dir_path()
+            if not session_base:
+                st.error("Create a session run folder first (see **Session run folder** at the top).")
+            else:
+                RUN_DIR.mkdir(parents=True, exist_ok=True)
+                docs_dir = session_base / "docs_input"
+                docs_dir.mkdir(parents=True, exist_ok=True)
 
-            saved_paths = []
-            for doc_file in (document_files or [])[:MAX_DOC_FILES]:
-                saved_paths.append(save_uploaded_to_folder(doc_file, DOCS_INPUT_DIR))
+                saved_paths = []
+                for doc_file in (document_files or [])[:MAX_DOC_FILES]:
+                    saved_paths.append(save_uploaded_to_folder(doc_file, docs_dir))
 
-            builder = load_context_builder_module()
-            context_md = builder.build_context_from_files(saved_paths, process_images=True)
-            context_md = f"# Document Type\n\nBPD\n\n{context_md}"
-            context_path = RUN_DIR / "context.md"
-            context_path.write_text(context_md, encoding="utf-8")
+                context_md = build_context.build_context_from_files(saved_paths, process_images=True)
+                context_md = f"# Document Type\n\nBPD\n\n{context_md}"
+                context_path = session_base / "context.md"
+                context_path.write_text(context_md, encoding="utf-8")
+                st.session_state.active_run_dir = str(session_base)
 
-            st.success(f"Saved: {context_path}")
-            st.download_button(
-                label="Download context.md",
-                data=context_md,
-                file_name="context.md",
-                mime="text/markdown",
-            )
+                st.success(f"Saved: {context_path}")
+                st.download_button(
+                    label="Download context.md",
+                    data=context_md,
+                    file_name="context.md",
+                    mime="text/markdown",
+                )
 
 populate_left, populate_right = st.columns(2)
 
 with populate_left:
     with st.container(border=True):
-        st.subheader("Build prompt template for Doc (BPD)")
-        st.caption(
-            "Template: `prompts/bpd/p2_populate.md` — fills "
-            "`{{BUSINESS_CONTEXT}}`, `{{SCHEMA_JSON}}`, `{{APPENDED_MEETING_INPUT}}`, "
-            "`{{CONTEXT_INPUT_MD}}` via the prompt builder."
-        )
+        st.subheader("Populate Prompt (BPD)")
 
-        prompt_builder_mod = load_prompt_builder_module()
-        run_subdirs = prompt_builder_mod.list_bpd_run_dirs(RUN_DIR)
+        run_subdirs = build_prompt.list_bpd_run_dirs(RUN_DIR)
 
         pop_input_mode = st.radio(
             "Input source",
             options=("live_session", "run_folder"),
             format_func=lambda x: (
-                "Live session (Schema + Process Files below)"
+                "Live session"
                 if x == "live_session"
-                else "Existing run folder (meeting-input.json + schema file only)"
+                else "Run folder"
             ),
             horizontal=True,
             key="bpd_pop_input_mode",
         )
 
-        global_context_path = RUN_DIR / "context.md"
+        session_base_pop = session_run_dir_path()
+        session_context_md_path = (
+            (session_base_pop / "context.md") if session_base_pop else None
+        )
         selected_run_path: Path | None = None
         if pop_input_mode == "run_folder":
             if not run_subdirs:
-                st.warning("No `run_NNN` folders under `run/`. Export a schema or populate inputs first.")
+                st.warning("No run folders found.")
             else:
                 labels = [p.name for p in run_subdirs]
                 pick = st.selectbox(
-                    "Run folder (inputs read only from this directory)",
+                    "Run folder",
                     options=labels,
                     key="bpd_populate_run_folder_select",
                 )
                 selected_run_path = RUN_DIR / pick
-                st.markdown("**Files used from this folder** (no live transcript reload):")
-                req_meet = selected_run_path / "meeting-input.json"
-                sch_a = selected_run_path / "schema-input.json"
-                sch_b = selected_run_path / "r1_schema.json"
-                ctx_local = selected_run_path / "context.md"
-                st.write(
-                    f"{'✓' if req_meet.is_file() else '✗'} `meeting-input.json` — required"
-                )
-                if sch_a.is_file():
-                    st.write("✓ `schema-input.json`")
-                elif sch_b.is_file():
-                    st.write("✓ `r1_schema.json`")
-                else:
-                    st.write("✗ `schema-input.json` or `r1_schema.json` — one required")
-                st.write(
-                    f"{'✓' if ctx_local.is_file() else '○'} `context.md` (optional; falls back to `run/context.md`)"
-                )
+                st.session_state.bpd_session_run_dir = str(selected_run_path)
+                st.session_state.active_run_dir = str(selected_run_path)
+                with st.expander("Folder file checks", expanded=False):
+                    req_meet = selected_run_path / "meeting-input.json"
+                    sch_a = selected_run_path / "schema-input.json"
+                    sch_b = selected_run_path / "r1_schema.json"
+                    ctx_local = selected_run_path / "context.md"
+                    st.write(
+                        f"{'✓' if req_meet.is_file() else '✗'} `meeting-input.json` (required)"
+                    )
+                    if sch_a.is_file():
+                        st.write("✓ `schema-input.json`")
+                    elif sch_b.is_file():
+                        st.write("✓ `r1_schema.json`")
+                    else:
+                        st.write("✗ `schema-input.json` or `r1_schema.json`")
+                    st.write(
+                        f"{'✓' if ctx_local.is_file() else '○'} `context.md` (optional)"
+                    )
         else:
-            if global_context_path.exists():
-                st.caption(
-                    f"`{{{{CONTEXT_INPUT_MD}}}}`: `{global_context_path}`"
-                )
+            if session_context_md_path and session_context_md_path.is_file():
+                st.caption(f"Using context: `{session_context_md_path}`")
             else:
-                st.info(
-                    "No `run/context.md` — `{{CONTEXT_INPUT_MD}}` uses a placeholder until Context Builder runs."
-                )
+                st.info("No `context.md` in your session folder yet. Use **Context Builder**.")
 
         sync_s, sync_b = st.columns(2)
         with sync_s:
@@ -818,7 +655,7 @@ with populate_left:
             disabled=pop_input_mode == "run_folder",
         )
         if pop_input_mode == "run_folder":
-            st.caption("Schema JSON field ignored — using `schema-input.json` or `r1_schema.json` from the selected folder.")
+            st.caption("Ignored in run-folder mode.")
 
         st.text_area(
             "Business Context",
@@ -829,16 +666,16 @@ with populate_left:
 
         if pop_input_mode == "live_session":
             if st.session_state.meeting_records:
-                st.caption("Meetings (transcript paths) from Process Files:")
-                for meeting in st.session_state.meeting_records:
-                    st.write(
-                        f"Meeting {meeting['meeting_number']} | Date: {meeting['meeting_date']} | "
-                        f"JSON: {Path(meeting['transcript_path']).name}"
-                    )
+                with st.expander("Meetings from Process Files", expanded=False):
+                    for meeting in st.session_state.meeting_records:
+                        st.write(
+                            f"Meeting {meeting['meeting_number']} | Date: {meeting['meeting_date']} | "
+                            f"JSON: {Path(meeting['transcript_path']).name}"
+                        )
             else:
-                st.warning("Process meeting recordings first — populate prompt needs transcript JSON.")
+                st.warning("Process files first.")
 
-        if st.button("Export final-content-populate-prompt", type="primary"):
+        if st.button("Build populate prompt", type="primary"):
             try:
                 bc = st.session_state.bpd_pop_business_context_editable or ""
 
@@ -849,56 +686,62 @@ with populate_left:
                         ctx_path = selected_run_path / "context.md"
                         if ctx_path.is_file():
                             context_md_text = ctx_path.read_text(encoding="utf-8", errors="ignore")
-                        elif global_context_path.is_file():
-                            context_md_text = global_context_path.read_text(
+                        elif (
+                            session_context_md_path
+                            and session_context_md_path.is_file()
+                        ):
+                            context_md_text = session_context_md_path.read_text(
                                 encoding="utf-8", errors="ignore"
                             )
                         else:
                             context_md_text = ""
-                        pop_result = prompt_builder_mod.build_bpd_pop_prompt_from_run_folder(
+                        pop_result = build_prompt.build_bpd_pop_prompt_from_run_folder(
                             run_dir=selected_run_path,
                             business_context=bc,
                             context_markdown=context_md_text,
                         )
                         st.session_state.bpd_populate_prompt_result = pop_result
+                        st.session_state.active_run_dir = pop_result.get("run_dir", "")
                         st.success(
                             f"Saved populate prompt: `{pop_result['prompt_path']}`"
                         )
-                        st.caption(f"Meeting input: {pop_result['meeting_json_path']}")
-                        st.caption(f"Schema input: {pop_result['schema_json_path']}")
                         st.download_button(
-                            label="Download final-content-populate-prompt.md",
+                            label="Download populate prompt",
                             data=pop_result["prompt"],
                             file_name="final-content-populate-prompt.md",
                             mime="text/markdown",
                         )
                 else:
                     schema_text = (st.session_state.bpd_pop_schema_json_editable or "").strip()
-                    if not schema_text:
+                    if not session_base_pop:
+                        st.error(
+                            "Create a session run folder first (see **Session run folder** at the top)."
+                        )
+                    elif not schema_text:
                         st.error("Schema JSON is empty. Build or paste schema JSON first.")
                     elif not st.session_state.meeting_records:
                         st.error("No meeting recordings processed yet.")
                     else:
                         context_md_text = ""
-                        if global_context_path.exists():
-                            context_md_text = global_context_path.read_text(
+                        if session_context_md_path and session_context_md_path.is_file():
+                            context_md_text = session_context_md_path.read_text(
                                 encoding="utf-8", errors="ignore"
                             )
-                        pop_result = prompt_builder_mod.build_bpd_pop_prompt(
+                        pop_result = build_prompt.build_bpd_pop_prompt(
                             business_context=bc,
                             schema_json=schema_text,
                             meetings=st.session_state.meeting_records,
                             run_base_dir=RUN_DIR,
+                            run_dir=session_base_pop,
                             context_markdown=context_md_text,
                         )
                         st.session_state.bpd_populate_prompt_result = pop_result
+                        st.session_state.active_run_dir = pop_result.get("run_dir", "")
                         st.success(
                             f"Saved populate prompt: `{pop_result['prompt_path']}`"
                         )
-                        st.caption(f"Meeting input: {pop_result['meeting_json_path']}")
-                        st.caption(f"Schema input: {pop_result['schema_json_path']}")
                         st.download_button(
-                            label="Download final-content-populate-prompt.md",
+                            label="Download populate prompt",
                             data=pop_result["prompt"],
                             file_name="final-content-populate-prompt.md",
                             mime="text/markdown",
@@ -907,12 +750,7 @@ with populate_left:
                 st.error(f"Failed to build populate prompt: {exc}")
 
         st.markdown("---")
-        st.markdown("**Gemini → `r2_populated.json`**")
-        st.caption(
-            "Builds populate prompt from template + meeting input + schema + business context, "
-            f"calls Vertex (`project={BPD_PROJECT_ID}`, `location={BPD_LOCATION}`), "
-            "and saves `r2_populated.json` in the target run folder."
-        )
+        st.markdown("**Generate `r2_populated.json`**")
         r2_t_col, r2_m_col, _ = st.columns([1, 1, 2])
         with r2_t_col:
             r2_temp_in = st.number_input(
@@ -938,11 +776,24 @@ with populate_left:
         def _resolve_populate_run_dir() -> Path | None:
             if pop_input_mode == "run_folder":
                 return selected_run_path if selected_run_path and selected_run_path.is_dir() else None
+            sess = session_run_dir_path()
+            if sess and sess.is_dir():
+                return sess
             pr = st.session_state.bpd_populate_prompt_result
             if pr and pr.get("run_dir"):
                 p = Path(pr["run_dir"])
                 return p if p.is_dir() else None
+            active_run_dir_raw = str(st.session_state.get("active_run_dir", "")).strip()
+            if active_run_dir_raw:
+                p = Path(active_run_dir_raw)
+                return p if p.is_dir() else None
             return None
+
+        run_target_preview = _resolve_populate_run_dir()
+        if run_target_preview:
+            st.caption(f"Active run folder: `{run_target_preview}`")
+        else:
+            st.caption("Active run folder: not selected")
 
         if st.button("Generate r2_populated.json", type="primary"):
             try:
@@ -952,80 +803,49 @@ with populate_left:
                         st.error("Select a valid run folder.")
                     else:
                         st.error(
-                            "Export `final-content-populate-prompt` first (live session), "
-                            "or switch to **Existing run folder** and pick a run."
+                            "Build populate prompt first, or select a run folder."
                         )
                 else:
-                    meeting_json_path = run_target / "meeting-input.json"
-                    if not meeting_json_path.is_file():
+                    populate_prompt_path = run_target / "final-content-populate-prompt.md"
+                    if not populate_prompt_path.is_file():
                         st.error(
-                            f"Missing `{meeting_json_path.name}` in `{run_target}`. "
-                            "Export the populate prompt first so meeting input is available."
+                            f"Missing `{populate_prompt_path.name}` in `{run_target}`. "
+                            "Build populate prompt first."
                         )
                     else:
-                        schema_json_path = run_target / "schema-input.json"
-                        if not schema_json_path.is_file():
-                            schema_json_path = run_target / "r1_schema.json"
-                        if not schema_json_path.is_file():
-                            st.error(
-                                f"Missing `schema-input.json` or `r1_schema.json` in `{run_target}`."
-                            )
-                        else:
-                            p2_prompt_path = Path(__file__).resolve().parent / "prompts" / "bpd" / "p2_populate.md"
-                            if not p2_prompt_path.is_file():
-                                st.error(f"Missing populate template: `{p2_prompt_path}`")
-                            else:
-                                p2_prompt = p2_prompt_path.read_text(encoding="utf-8", errors="ignore")
-                                appended_meeting = meeting_json_path.read_text(encoding="utf-8", errors="ignore")
-                                schema_json = schema_json_path.read_text(encoding="utf-8", errors="ignore")
-                                local_context_md = run_target / "context.md"
-                                if local_context_md.is_file():
-                                    context_input_md = local_context_md.read_text(encoding="utf-8", errors="ignore")
-                                elif global_context_path.is_file():
-                                    context_input_md = global_context_path.read_text(encoding="utf-8", errors="ignore")
-                                else:
-                                    context_input_md = ""
-                                business_context = st.session_state.bpd_pop_business_context_editable or ""
-                                generated = generate_r2_populated_from_prompt(
-                                    p2_prompt=p2_prompt,
-                                    appended_meeting=appended_meeting,
-                                    schema_json=schema_json,
-                                    business_context=business_context,
-                                    context_input_md=context_input_md,
-                                    temperature=st.session_state.bpd_r2_pop_temperature,
-                                    max_output_tokens=st.session_state.bpd_r2_pop_max_tokens,
-                                )
-                                out_path = run_target / "r2_populated.json"
-                                out_path.write_text(generated, encoding="utf-8")
-                                st.success(f"Saved `{out_path}`")
-                                st.download_button(
-                                    label="Download r2_populated.json",
-                                    data=generated,
-                                    file_name="r2_populated.json",
-                                    mime="application/json",
-                                    key="download_r2_populated_json",
-                                )
+                        generated = run_prompt_file(
+                            prompt_path=populate_prompt_path,
+                            temperature=st.session_state.bpd_r2_pop_temperature,
+                            max_output_tokens=st.session_state.bpd_r2_pop_max_tokens,
+                        )
+
+                        out_path = run_target / "r2_populated.json"
+                        out_path.write_text(generated, encoding="utf-8")
+
+                        st.success(f"Saved `{out_path}`")
+
+                        st.download_button(
+                            label="Download r2_populated.json",
+                            data=generated,
+                            file_name="r2_populated.json",
+                            mime="application/json",
+                            key="download_r2_populated_json",
+                        )
+
             except Exception as exc:
                 st.error(f"Failed to generate r2_populated.json: {exc}")
 
 with populate_right:
     with st.container(border=True):
         st.subheader("JSON → DOCX converter")
-        st.caption(
-            "Converts `r2_populated.json` from the selected run folder into "
-            "`doctype_doc.docx` using `templates/bpd_template.js`."
-        )
 
         run_target = _resolve_populate_run_dir()
         template_script = Path(__file__).resolve().parent / "templates" / "bpd_template.js"
 
         if run_target:
-            st.caption(f"Target run folder: `{run_target}`")
+            st.caption(f"Run folder: `{run_target}`")
             json_input = run_target / "r2_populated.json"
             docx_output = run_target / "doctype_doc.docx"
-            st.caption(
-                f"Command: `node {template_script} {json_input} {docx_output}`"
-            )
 
             if st.button("Convert r2_populated.json → doctype_doc.docx", type="primary"):
                 try:
@@ -1074,10 +894,7 @@ with populate_right:
                     st.error(f"Failed to convert JSON to DOCX: {exc}")
         else:
             if pop_input_mode == "run_folder":
-                st.info("Select a valid run folder to enable DOCX conversion.")
+                st.info("Select a valid run folder.")
             else:
-                st.info(
-                    "Generate `r2_populated.json` first, or switch to **Existing run folder** "
-                    "and select a run containing it."
-                )
+                st.info("Generate `r2_populated.json` first.")
 

@@ -6,6 +6,13 @@ try:
 except Exception:
     to_markdown = None
 
+try:
+    # Import order matters for layout-aware extraction.
+    import pymupdf.layout  # noqa: F401
+    import pymupdf4llm
+except Exception:
+    pymupdf4llm = None
+
 _gemini_import_error = None
 try:
     from backend.gemini_call import gemini_call
@@ -45,6 +52,15 @@ def doc_to_md(file_path: str) -> str:
 
     if ext == ".md" or ext == ".txt":
         return _safe_read_text(path)
+
+    if ext == ".pdf" and pymupdf4llm is not None:
+        try:
+            # Drop repetitive page artifacts where possible.
+            return pymupdf4llm.to_markdown(str(path), header=False, footer=False).strip()
+        except Exception as exc:
+            # Fall back to all2md path below if available.
+            if to_markdown is None:
+                return f"(Could not parse {path.name} with pymupdf4llm: {exc})"
 
     if to_markdown is None:
         return f"(Skipping {path.name}: all2md not installed.)"

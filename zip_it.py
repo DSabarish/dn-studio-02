@@ -35,7 +35,11 @@ from pathlib import Path
 # DN-STUDIO: include everything needed to run & develop the app
 # (backend, frontend source, prompts, config, templates, scripts, docs, Docker).
 # Exclude secrets, venv, node_modules, build outputs, runtime outputs.
+# Keep EXCLUDED_* in sync with .gitignore where applicable.
 # ─────────────────────────────────────────────────────────────────────────────
+
+# Hidden dirs os.walk normally skips; allow these so e.g. .streamlit/config.toml can ship.
+WALKABLE_DOT_DIRS = frozenset({".streamlit"})
 
 INCLUDED_EXTENSIONS = {
     ".py",
@@ -82,12 +86,16 @@ EXCLUDED_DIRS = {
     "htmlcov",
     ".tox",
     ".hypothesis",
+    ".pyre",
+    "pip-wheel-metadata",
     "logs",
     ".secrets",
     ".vincent",  # Kiro/Vincent IDE config
     ".kiro",     # Kiro IDE config
     "code_backup",  # do not recurse into previous backups
     "outputs",  # runtime: diarisation, generated docs
+    "run",  # .gitignore: generated app outputs
+    "test-files",  # .gitignore
     "gcs",
     "catboost_info",
     "lightgbm_cache",
@@ -128,6 +136,8 @@ SENSITIVE_PATH_GLOBS = [
     ".env",
     ".env.*",
     "**/.env",
+    ".streamlit/secrets.toml",
+    "**/.streamlit/secrets.toml",
     "**/secrets/**",
     "**/.aws/**",
     "**/.ssh/**",
@@ -156,6 +166,9 @@ EXCLUDED_PATTERNS = [
     ".DS_Store",
     "Thumbs.db",
     "desktop.ini",
+    "*.local",
+    "templates/package.json",
+    "templates/package-lock.json",
     "*.log",
     "*.log.*",
     "*.tmp",
@@ -329,6 +342,10 @@ def should_exclude_path(file_path: Path, root: Path) -> bool:
     name = file_path.name
     parts = rel_path.parts
 
+    # .gitignore: !.env.example — do not treat as secret
+    if name == ".env.example" and len(parts) == 1:
+        return False
+
     for part in parts:
         if part in EXCLUDED_DIRS:
             return True
@@ -337,7 +354,7 @@ def should_exclude_path(file_path: Path, root: Path) -> bool:
 
     if _matches_any_glob(rel_posix, name, tuple(SENSITIVE_FILES)):
         return True
-    if _matches_any_glob(rel_posix, name, SENSITIVE_PATH_GLOBS):
+    if _matches_any_glob(rel_posix, name, tuple(SENSITIVE_PATH_GLOBS)):
         return True
 
     # Explicit allow: core source trees
@@ -384,7 +401,8 @@ def collect_files(project_root: Path) -> list[Path]:
         dirnames[:] = [
             d
             for d in dirnames
-            if d not in EXCLUDED_DIRS and not d.startswith(".")
+            if d not in EXCLUDED_DIRS
+            and (not d.startswith(".") or d in WALKABLE_DOT_DIRS)
         ]
 
         root_path = Path(dirpath)
