@@ -34,8 +34,6 @@ pip-wheel-metadata/
 run/
 test-files/
 templates/node_modules/
-templates/package-lock.json
-templates/package.json
 
 # zip_it.py backups & Claude bundles (large)
 code_backup/

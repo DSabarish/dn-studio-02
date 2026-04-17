@@ -1,0 +1,48 @@
+# Git / VCS
+.git
+.gitignore
+
+# Python
+**/__pycache__
+**/*.py[cod]
+**/*$py.class
+.venv
+venv
+env
+ENV
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.pyre
+.hypothesis
+*.egg-info
+.eggs
+pip-wheel-metadata
+
+# Local secrets (mount at runtime instead)
+.env
+.env.*
+!.env.example
+
+# Generated / large local data
+run
+test-files
+code_backup
+outputs
+*.log
+test_vertex_out.json
+c.json
+
+# IDE / OS
+.vscode
+.idea
+.cursor
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Node (reinstall in image)
+templates/node_modules
+
+# Archives
+*.zip

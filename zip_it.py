@@ -45,6 +45,7 @@ INCLUDED_EXTENSIONS = {
     ".py",
     ".ipynb",
     ".md",
+    ".sh",
     ".txt",
     ".csv",
     ".json",
@@ -241,6 +242,7 @@ INCLUDED_PATH_PREFIXES = (
     "prompts/",
     "templates/",
     "scripts/",
+    "docker/",
 )
 
 INCLUDED_ROOT_FILES = (

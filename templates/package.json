@@ -1,0 +1,8 @@
+{
+  "name": "dn-studio-templates",
+  "private": true,
+  "description": "Node deps for BPD DOCX generation (bpd_template.js)",
+  "dependencies": {
+    "docx": "^9.0.0"
+  }
+}
