@@ -1,0 +1,54 @@
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pyre/
+.hypothesis/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Build/package artifacts
+build/
+dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+
+# Local environment files
+.env
+.env.*
+!.env.example
+*.local
+
+# Streamlit/local app state
+.streamlit/secrets.toml
+
+# Generated project outputs
+run/
+test-files/
+templates/node_modules/
+templates/package-lock.json
+templates/package.json
+
+# Logs and temp files
+*.log
+*.tmp
+tmp/
+temp/
+
+# IDE/editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
