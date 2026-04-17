@@ -1,4 +1,3 @@
-# Linux / Docker and cross-platform: keep LF in the repo
-docker/entrypoint.sh text eol=lf
+# Cross-platform: LF in repo for npm manifests
 templates/package.json text eol=lf
 templates/package-lock.json text eol=lf

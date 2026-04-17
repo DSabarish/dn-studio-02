@@ -4,6 +4,41 @@ from pathlib import Path
 
 
 PROMPT_TEMPLATE_PATH = Path("prompts") / "bpd" / "p1_schema.md"
+
+
+def _strip_markdown_json_fence(text: str) -> str:
+    """Remove optional ```json ... ``` wrapper (common when pasting model output)."""
+    t = (text or "").strip()
+    if not t.startswith("```"):
+        return t
+    first_nl = t.find("\n")
+    if first_nl == -1:
+        return t
+    body = t[first_nl + 1 :]
+    body = body.rstrip()
+    if body.endswith("```"):
+        body = body[: -3].rstrip()
+    return body
+
+
+def _loads_json_document(label: str, text: str):
+    """Parse JSON with a clear error naming the source (schema vs meeting file, etc.)."""
+    cleaned = _strip_markdown_json_fence((text or "").strip())
+    if not cleaned:
+        raise ValueError(f"{label}: content is empty.")
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError as exc:
+        pos = getattr(exc, "pos", None) or 0
+        start = max(0, pos - 100)
+        end = min(len(cleaned), pos + 100)
+        snippet = cleaned[start:end].replace("\n", "\\n")
+        raise ValueError(
+            f"{label}: invalid JSON — {exc.msg} at line {exc.lineno}, column {exc.colno} "
+            f"(char {pos}). Snippet: …{snippet}…"
+        ) from exc
+
+
 POPULATE_TEMPLATE_PATH = Path("prompts") / "bpd" / "p2_populate.md"
 
 
@@ -60,9 +95,10 @@ def _read_transcript_json(transcript_path: Path):
 
     if path.suffix.lower() == ".json":
         try:
-            return json.loads(path.read_text(encoding="utf-8"))
-        except Exception as exc:
-            return {"error": f"Invalid transcript JSON: {exc}"}
+            raw = path.read_text(encoding="utf-8")
+            return _loads_json_document(f"Transcript JSON ({path.name})", raw)
+        except ValueError as exc:
+            return {"error": str(exc)}
 
     # Fallback for non-json transcript files.
     try:
@@ -88,10 +124,7 @@ def list_bpd_run_dirs(run_base_dir: Path) -> list[Path]:
 
 def _normalize_schema_json(schema_json):
     if isinstance(schema_json, str):
-        schema_text = schema_json.strip()
-        if not schema_text:
-            raise ValueError("Schema JSON cannot be empty.")
-        parsed = json.loads(schema_text)
+        parsed = _loads_json_document("Schema JSON (BPD design / r1)", schema_json)
     else:
         parsed = schema_json
     return json.dumps(parsed, ensure_ascii=False, indent=2)
@@ -226,10 +259,7 @@ def build_bpd_pop_prompt_from_run_folder(
         raise FileNotFoundError(f"Missing meeting-input.json in {run_dir}")
 
     meeting_raw = meeting_path.read_text(encoding="utf-8")
-    try:
-        parsed_meetings = json.loads(meeting_raw)
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"Invalid meeting-input.json: {exc}") from exc
+    parsed_meetings = _loads_json_document(f"meeting-input.json ({meeting_path})", meeting_raw)
     meeting_input_json = json.dumps(parsed_meetings, ensure_ascii=False, indent=2)
 
     schema_path = run_dir / "schema-input.json"
@@ -240,7 +270,9 @@ def build_bpd_pop_prompt_from_run_folder(
             f"Missing schema file: need schema-input.json or r1_schema.json in {run_dir}"
         )
 
-    schema_json_text = _normalize_schema_json(schema_path.read_text(encoding="utf-8"))
+    schema_json_text = _normalize_schema_json(
+        schema_path.read_text(encoding="utf-8", errors="replace")
+    )
     context_text = (context_markdown or "").strip() or (
         "(No context.md available in this run folder or at run/context.md.)"
     )
