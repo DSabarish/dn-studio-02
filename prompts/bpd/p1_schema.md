@@ -24,6 +24,9 @@ Only design the structure.
 **3. H1 Sections:**
 {{H1_SECTIONS}}
 
+**4. Context.md (supporting documents / materials):**
+{{CONTEXT_INPUT_MD}}
+
 ---
 
 ## INSTRUCTIONS
@@ -58,6 +61,45 @@ For ALL OTHER H1 sections:
 → Do NOT force "Process Introduction" 
 
 ---
+---------------------------------------------------------------------
+## SEMANTIC DEDUPLICATION RULE (MANDATORY — CRITICAL)
+---------------------------------------------------------------------
+
+Eliminate redundancy at MEANING level, not wording level.
+
+Rules:
+- Two points with SAME meaning but different wording = ONE point
+- Do NOT create multiple bullets for paraphrased ideas
+- Do NOT use “fancy English” to increase count
+- Prefer fewer, denser, technically precise points
+
+ENFORCEMENT:
+Before assigning n:
+1. List all candidate points
+2. Merge semantically overlapping points
+3. Keep ONLY DISTINCT ideas
+4. Set n = final deduplicated count
+
+n is a MAXIMUM — not a target.
+
+---------------------------------------------------------------------
+### H3 MINIMISATION RULE (MANDATORY — NO OVER-SPLITTING)
+---------------------------------------------------------------------
+
+If multiple H3 candidates belong to the SAME topic:
+→ They MUST be merged into ONE H3
+
+DO NOT split based on:
+- wording variation
+- sub-angle explanation
+- minor distinctions
+
+Rule:
+ONE topic = ONE H3
+
+Preference:
+1 strong H3 (higher n) >> multiple weak H3s
+----
 
 ### 2. FORMAT ASSIGNMENT RULES
 Assign the most appropriate format for each H3:
