@@ -200,7 +200,69 @@ single topic:
   `[TO BE CONFIRMED — possible schema over-split; no distinct content
   available to differentiate from sibling H3]`
 
+
 ----
+
+### 3. SOURCE REFERENCE TRACKING ← NEW
+For every H3 section you populate, include `source_references`:
+
+1. As you write content, identify which utterances you reference
+2. For each utterance, capture its `utterance_id`
+3. Return utterance IDs in a simple array
+
+```json
+"source_references": [0, 1, 5]
+```
+
+For `[INFERRED]` sections: use `"source_references": []`
+
+If content includes Context.md: `"source_references": [12, 15, "context_md"]`
+
+### HALLUCINATION CONTROL RULES (CRITICAL)
+
+#### 1. STRICT SOURCE RULE
+
+All content MUST be derived only from:
+
+* The diarisation transcript
+* OR `[INFERRED]` sections (for structure/general logic only)
+
+If information is not present in the transcript:
+→ Do NOT generate it
+
+---
+
+#### 2. NO FABRICATION RULE
+
+STRICTLY PROHIBITED:
+
+* Inventing facts, values, or business details
+* Creating sample/example data (IDs, names, amounts, metrics)
+* Generating realistic but unsupported information
+
+---
+
+#### 3. MISSING DATA RULE
+
+If required data is not available in the transcript:
+
+* Do NOT assume or approximate
+* Use:
+  `[TO BE CONFIRMED — data not available in transcript]`
+
+This rule overrides format and completeness requirements
+
+
+
+**Format:**
+```json
+"source_references": [0, 1, 5]
+```
+
+**For [INFERRED] sections:**
+- Use `source_references: []` (empty array)
+
+---
 
 ### 4. CONTENT SOURCE RULES
 - Draw ALL content from the aggregated meeting input first
@@ -289,7 +351,7 @@ Context.md may contain large volumes (50–100+ pages). You MUST extract selecti
 
 #### Step 5 — Strict Relevance Check
 Before including any Context.md content:
-→ "Does this directly help answer this H3?"
+→ “Does this directly help answer this H3?”
 
 If NO → DO NOT include it  
 
@@ -377,7 +439,8 @@ Return the populated document in this exact structure:
               "[TAG]": "H3",
               "name": "<H3 Name>",
               "format": "<format as per schema>",
-              "content": "<see content format rules below>"
+              "content": "<see content format rules below>",
+              "source_references": [0, 1, 5]
             }
           ]
         }
@@ -424,7 +487,9 @@ Return the populated document in this exact structure:
 
 ## OUTPUT CONSTRAINTS
 - Output STRICT JSON only — no text before or after
-- Every H3 must have a `content` field
+- Every H3 must have BOTH `content` AND `source_references` fields
+- `source_references` must be an array of utterance IDs (integers)
+- Use empty array `[]` for [INFERRED] sections
 - Respect exact counts for `PARAGRAPH[n]` and `NUMBERED[n]`
 - For `BULLETS[n]`: n is a maximum — write fewer if consolidation demands it
 - Respect exact dimensions for `TABLE[n_rows,n_cols]`
@@ -438,7 +503,7 @@ You are operating under a strict output token budget.
 If you are approaching your token limit before completing all sections, you MUST:
 1. Finish the current H3 `content` array cleanly (close all open strings, arrays, and objects)
 2. For all remaining H3 sections, output the minimal valid stub:
-   `{"[TAG]": "H3", "name": "<name as per schema>", "format": "<format>", "content": ["[TO BE CONFIRMED — token budget exhausted]"]}`
+   `{"[TAG]": "H3", "name": "<name as per schema>", "format": "<format>", "content": ["[TO BE CONFIRMED — token budget exhausted]"], "source_references": []}`
 3. Close all parent H2, H1, and root objects properly
 4. NEVER stop mid-string, mid-array, or mid-object
 5. A structurally valid but incomplete JSON is far preferable to a broken one
