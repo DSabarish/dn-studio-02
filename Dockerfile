@@ -39,4 +39,5 @@ EXPOSE 8501
 # - --server.port=8501: listen port (match EXPOSE / `docker run -p`).
 # - --server.address=0.0.0.0: accept connections from outside the container (not only localhost).
 # - --server.headless=true: no browser auto-open; correct for containers.
-CMD ["streamlit", "run", "app.py", "--server.port=8501", "--server.address=0.0.0.0", "--server.headless=true"]
+# CMD ["streamlit", "run", "app.py", "--server.port=8501", "--server.address=0.0.0.0", "--server.headless=true"]
+CMD ["streamlit", "run", "app2.py", "--server.port=8501", "--server.address=0.0.0.0", "--server.headless=true"]

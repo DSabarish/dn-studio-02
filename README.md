@@ -77,9 +77,9 @@ That creates a file on the host. **Mount that file** into the container and poin
 **Linux / macOS:**
 
 ```bash
-docker run --rm -p 8501:8501 \
-  -e GOOGLE_APPLICATION_CREDENTIALS=/run/secrets/application_default_credentials.json \
-  -v "$HOME/.config/gcloud/application_default_credentials.json:/run/secrets/application_default_credentials.json:ro" \
+docker run --rm -p 8501:8501 `
+  -e GOOGLE_APPLICATION_CREDENTIALS=/run/secrets/application_default_credentials.json `
+  -v "$HOME/.config/gcloud/application_default_credentials.json:/run/secrets/application_default_credentials.json:ro" `
   sabs1010/dn-studio:v4
 ```
 
