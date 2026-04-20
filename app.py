@@ -708,7 +708,7 @@ with populate_left:
                         st.download_button(
                             label="Download populate prompt",
                             data=pop_result["prompt"],
-                            file_name="final-content-populate-prompt.md",
+                            file_name="debug-prompt-populate-content.md",
                             mime="text/markdown",
                         )
                 else:
@@ -743,7 +743,7 @@ with populate_left:
                         st.download_button(
                             label="Download populate prompt",
                             data=pop_result["prompt"],
-                            file_name="final-content-populate-prompt.md",
+                            file_name="debug-prompt-populate-content.md",
                             mime="text/markdown",
                         )
             except Exception as exc:
@@ -806,7 +806,7 @@ with populate_left:
                             "Build populate prompt first, or select a run folder."
                         )
                 else:
-                    populate_prompt_path = run_target / "final-content-populate-prompt.md"
+                    populate_prompt_path = run_target / "debug-prompt-populate-content.md"
                     if not populate_prompt_path.is_file():
                         st.error(
                             f"Missing `{populate_prompt_path.name}` in `{run_target}`. "

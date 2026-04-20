@@ -217,7 +217,7 @@ def build_bpd_pop_prompt(
     else:
         run_dir = Path(run_dir).resolve()
         run_dir.mkdir(parents=True, exist_ok=True)
-    prompt_path = run_dir / "final-content-populate-prompt.md"
+    prompt_path = run_dir / "debug-prompt-populate-content.md"
     prompt_path.write_text(prompt, encoding="utf-8")
 
     meeting_json_path = run_dir / "meeting-input.json"
@@ -248,7 +248,7 @@ def build_bpd_pop_prompt_from_run_folder(
     - `meeting-input.json` (required)
     - `schema-input.json` or `r1_schema.json` (required)
     Does not re-read transcripts from disk; uses embedded JSON in meeting-input as-is.
-    Writes `final-content-populate-prompt.md` into the same `run_dir`.
+    Writes `debug-prompt-populate-content.md` into the same `run_dir`.
     """
     run_dir = Path(run_dir).resolve()
     if not run_dir.is_dir():
@@ -286,7 +286,7 @@ def build_bpd_pop_prompt_from_run_folder(
         context_text,
     )
 
-    prompt_path = run_dir / "final-content-populate-prompt.md"
+    prompt_path = run_dir / "debug-prompt-populate-content.md"
     prompt_path.write_text(prompt, encoding="utf-8")
 
     return {

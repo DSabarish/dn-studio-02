@@ -476,7 +476,7 @@ if run_clicked and meeting_files:
             log(f"Wrote `{pop_result['prompt_path']}`")
 
             log("**Step 7/8** — Calling model for r2_populated.json…")
-            populate_prompt_path = session_base / "final-content-populate-prompt.md"
+            populate_prompt_path = session_base / "debug-prompt-populate-content.md"
             r2_text = run_prompt_file(
                 prompt_path=populate_prompt_path,
                 temperature=st.session_state.app2_r2_temperature,
@@ -520,6 +520,7 @@ run_dir_raw = str(st.session_state.get("app2_last_run_dir", "")).strip()
 if run_dir_raw:
     run_path = Path(run_dir_raw)
     if run_path.is_dir():
+        run_key = run_path.name
         st.divider()
         st.subheader("Last run — downloads")
         st.caption(f"Folder: `{run_path}`")
@@ -534,7 +535,7 @@ if run_dir_raw:
                 data=r1.read_text(encoding="utf-8"),
                 file_name="r1_schema.json",
                 mime="application/json",
-                key="app2_dl_r1",
+                key=f"app2_dl_r1_{run_key}",
             )
         if r2.is_file():
             dcols[1].download_button(
@@ -542,7 +543,7 @@ if run_dir_raw:
                 data=r2.read_text(encoding="utf-8"),
                 file_name="r2_populated.json",
                 mime="application/json",
-                key="app2_dl_r2",
+                key=f"app2_dl_r2_{run_key}",
             )
         if ctx.is_file():
             dcols[2].download_button(
@@ -550,7 +551,7 @@ if run_dir_raw:
                 data=ctx.read_text(encoding="utf-8"),
                 file_name="context.md",
                 mime="text/markdown",
-                key="app2_dl_ctx",
+                key=f"app2_dl_ctx_{run_key}",
             )
         if docx.is_file():
             st.download_button(
@@ -558,7 +559,7 @@ if run_dir_raw:
                 data=docx.read_bytes(),
                 file_name="doctype_doc.docx",
                 mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                key="app2_dl_docx",
+                key=f"app2_dl_docx_{run_key}",
             )
 
         transcripts_dir = run_path / "transcripts"
@@ -578,5 +579,5 @@ if run_dir_raw:
                     data=z,
                     file_name=f"transcripts_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip",
                     mime="application/zip",
-                    key="app2_dl_zip",
+                    key=f"app2_dl_zip_{run_key}",
                 )

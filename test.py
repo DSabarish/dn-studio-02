@@ -12,7 +12,7 @@ PROJECT_ID = "dn-studio-01"
 LOCATION = "asia-south1"
 
 # Default to a known populate prompt under run/; override with argv[1].
-_default = Path("run") / "run_061" / "final-content-populate-prompt.md"
+_default = Path("run") / "run_061" / "debug-prompt-populate-content.md"
 prompt_path = Path(sys.argv[1]) if len(sys.argv) > 1 else _default
 prompt = prompt_path.read_text(encoding="utf-8", errors="ignore")
 
