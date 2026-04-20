@@ -40,6 +40,8 @@ def _loads_json_document(label: str, text: str):
 
 
 POPULATE_TEMPLATE_PATH = Path("prompts") / "bpd" / "p2_populate.md"
+POPULATE_PROMPT_FILENAME = "debug-prompt-populate-content.md"
+POPULATE_PROMPT_LEGACY_FILENAME = "final-content-populate-prompt.md"
 
 
 def _normalize_h1_headers(raw_h1_headers):
@@ -185,6 +187,18 @@ def _fill_bpd_populate_template(
     return prompt
 
 
+def _write_populate_prompt_files(run_dir: Path, prompt: str) -> Path:
+    """
+    Write populate prompt using both current and legacy filenames.
+    Returns the canonical (current) prompt path.
+    """
+    prompt_path = run_dir / POPULATE_PROMPT_FILENAME
+    prompt_path.write_text(prompt, encoding="utf-8")
+    legacy_prompt_path = run_dir / POPULATE_PROMPT_LEGACY_FILENAME
+    legacy_prompt_path.write_text(prompt, encoding="utf-8")
+    return prompt_path
+
+
 def build_bpd_pop_prompt(
     business_context: str,
     schema_json,
@@ -217,8 +231,7 @@ def build_bpd_pop_prompt(
     else:
         run_dir = Path(run_dir).resolve()
         run_dir.mkdir(parents=True, exist_ok=True)
-    prompt_path = run_dir / "debug-prompt-populate-content.md"
-    prompt_path.write_text(prompt, encoding="utf-8")
+    prompt_path = _write_populate_prompt_files(run_dir, prompt)
 
     meeting_json_path = run_dir / "meeting-input.json"
     meeting_json_path.write_text(meeting_input_json, encoding="utf-8")
@@ -286,8 +299,7 @@ def build_bpd_pop_prompt_from_run_folder(
         context_text,
     )
 
-    prompt_path = run_dir / "debug-prompt-populate-content.md"
-    prompt_path.write_text(prompt, encoding="utf-8")
+    prompt_path = _write_populate_prompt_files(run_dir, prompt)
 
     return {
         "prompt": prompt,

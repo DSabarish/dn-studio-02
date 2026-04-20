@@ -808,8 +808,14 @@ with populate_left:
                 else:
                     populate_prompt_path = run_target / "debug-prompt-populate-content.md"
                     if not populate_prompt_path.is_file():
+                        legacy_populate_prompt_path = run_target / "final-content-populate-prompt.md"
+                        if legacy_populate_prompt_path.is_file():
+                            populate_prompt_path = legacy_populate_prompt_path
+                    if not populate_prompt_path.is_file():
                         st.error(
-                            f"Missing `{populate_prompt_path.name}` in `{run_target}`. "
+                            "Missing `debug-prompt-populate-content.md` "
+                            "or `final-content-populate-prompt.md` "
+                            f"in `{run_target}`. "
                             "Build populate prompt first."
                         )
                     else:

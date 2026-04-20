@@ -477,6 +477,10 @@ if run_clicked and meeting_files:
 
             log("**Step 7/8** — Calling model for r2_populated.json…")
             populate_prompt_path = session_base / "debug-prompt-populate-content.md"
+            if not populate_prompt_path.is_file():
+                legacy_populate_prompt_path = session_base / "final-content-populate-prompt.md"
+                if legacy_populate_prompt_path.is_file():
+                    populate_prompt_path = legacy_populate_prompt_path
             r2_text = run_prompt_file(
                 prompt_path=populate_prompt_path,
                 temperature=st.session_state.app2_r2_temperature,
