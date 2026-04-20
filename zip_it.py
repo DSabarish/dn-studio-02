@@ -221,6 +221,11 @@ EXCLUDED_PATTERNS = [
     # Temporary Word files
     "~$*.docx",
     "~$*.doc",
+    # gap pipeline runtime/generated outputs
+    "gap/step*.json",
+    "gap/_pipeline_output.json",
+    "gap/SAP_Gap_Analysis.docx",
+    "gap/meeting-input.json",
 ]
 
 # JSON: exclude known secret shapes; normal app JSON still included (package.json, etc.)
@@ -241,6 +246,7 @@ INCLUDED_PATH_PREFIXES = (
     "prompts/",
     "templates/",
     "scripts/",
+    "gap/",
 )
 
 INCLUDED_ROOT_FILES = (

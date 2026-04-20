@@ -25,7 +25,6 @@ docker run --rm -p 8501:8501 `
   -v "$env:APPDATA\gcloud\application_default_credentials.json:/app/adc.json:ro" `
   sabs1010/dn-studio:v4
 
-
 # -------------------------
 # 5. Service Account
 # -------------------------

@@ -16,6 +16,11 @@ outputs
 .idea
 .cursor
 templates/node_modules
+gap/node_modules
+gap/__pycache__
+gap/_pipeline_output.json
+gap/step*.json
+gap/*.docx
 *.zip
 test_vertex_out.json
 c.json

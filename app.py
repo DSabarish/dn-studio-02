@@ -11,7 +11,8 @@ import streamlit as st
 from backend import build_context, build_prompt, transcriptions
 from backend.simple_llm import run_prompt_file, run_prompt_text
 
-MAX_FILE_SIZE_MB = 2048  # App-side safety limit per file (2 GB)
+# Cloud Run enforces a hard request size cap (~32 MB), so keep uploads below it.
+MAX_FILE_SIZE_MB = 30
 MAX_PARALLEL_WORKERS = 4
 MAX_DOC_FILES = 20
 RUN_DIR = Path(__file__).resolve().parent / "run"

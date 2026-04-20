@@ -38,6 +38,13 @@ templates/node_modules/
 # zip_it.py backups & Claude bundles (large)
 code_backup/
 
+# gap analysis generated/runtime files
+gap/node_modules/
+gap/__pycache__/
+gap/_pipeline_output.json
+gap/step*.json
+gap/*.docx
+
 # Local smoke-test / scratch outputs
 test_vertex_out.json
 c.json

@@ -1,3 +1,3 @@
 [server]
-# Raise upload limit from Streamlit default (200 MB) for long meeting recordings.
-maxUploadSize = 2048
+# Cloud Run request body limit is ~32 MB; keep Streamlit upload cap below that.
+maxUploadSize = 30
