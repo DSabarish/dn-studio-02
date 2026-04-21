@@ -34,6 +34,7 @@ pip-wheel-metadata/
 run/
 test-files/
 templates/node_modules/
+outputs/
 
 # zip_it.py backups & Claude bundles (large)
 code_backup/
@@ -75,3 +76,5 @@ htmlcov/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+quick--cmd.md

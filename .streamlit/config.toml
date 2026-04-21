@@ -1,3 +1,4 @@
 [server]
-# Cloud Run request body limit is ~32 MB; keep Streamlit upload cap below that.
-maxUploadSize = 30
+# Allow larger local uploads (MB).
+maxUploadSize = 300
+maxMessageSize = 300
