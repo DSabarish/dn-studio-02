@@ -25,7 +25,7 @@ uv pip install -r requirements.txt
 Run the app:
 
 ```bash
-streamlit run app.py
+streamlit run app2.py
 ```
 
 Open `http://localhost:8501`.
@@ -135,7 +135,7 @@ docker push sabs1010/dn-studio:v4
 
 ## Project layout (short)
 
-- `app.py` — Streamlit UI
+- `app2.py` — Streamlit UI (one-click BPD pipeline)
 - `backend/` — prompts, LLM helper, transcription, context building
 - `prompts/bpd/` — BPD prompt templates
 - `templates/` — Node DOCX generator
