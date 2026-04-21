@@ -145,3 +145,21 @@ docker push sabs1010/dn-studio:v4
 ## License
 
 See repository owner for license terms.
+
+
+- Test Files
+```
+gs://meeting-recordings-dn-studio-01/EMS_20251021.mp4
+gs://meeting-recordings-dn-studio-01/EMS_20251106.mp4
+
+gs://meeting-recordings-dn-studio-01/EMS_20251106.json
+gs://meeting-recordings-dn-studio-01/EMS_20260416.json
+
+
+gs://meeting-recordings-dn-studio-01/Workshop 1 SAP Utilities Orientation-20251014_130129-Meeting Recording.mp4
+gs://meeting-recordings-dn-studio-01/Workshop 2 Organizational Entities & Master data-20251015_093246-Meeting Recording.mp4
+gs://meeting-recordings-dn-studio-01/Workshop 3 Energy Data (Consumption)-20251015_140211-Meeting Recording.mp4
+
+
+
+```

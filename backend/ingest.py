@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 from pathlib import Path
 from urllib.parse import urlparse
 
 from google.cloud import storage
+
+logger = logging.getLogger("dn_studio.ingest")
 
 
 MEDIA_SUFFIXES = {
@@ -59,10 +62,12 @@ def load_gcs_meeting_inputs(raw_text: str) -> list[MeetingInput]:
     if not uris:
         return []
 
+    logger.info("Loading meeting inputs from GCS | uri_count=%s", len(uris))
     client = storage.Client()
     items: list[MeetingInput] = []
     for uri in uris:
         bucket_name, blob_name = parse_gcs_uri(uri)
+        logger.info("Downloading GCS object | bucket=%s | object=%s", bucket_name, blob_name)
         blob = client.bucket(bucket_name).blob(blob_name)
         payload = blob.download_as_bytes()
         file_name = Path(blob_name).name or "gcs_input"
@@ -70,6 +75,7 @@ def load_gcs_meeting_inputs(raw_text: str) -> list[MeetingInput]:
         if not suffix:
             raise ValueError(f"Unsupported GCS object (missing extension): {uri}")
         items.append(MeetingInput(name=file_name, suffix=suffix, content=payload, source_uri=uri))
+    logger.info("Loaded GCS meeting inputs | loaded_count=%s", len(items))
     return items
 
 
@@ -80,4 +86,5 @@ def load_uploaded_meeting_inputs(uploaded_files) -> list[MeetingInput]:
         content = uf.read()
         name = Path(uf.name).name
         items.append(MeetingInput(name=name, suffix=Path(name).suffix.lower(), content=content))
+    logger.info("Loaded uploaded meeting inputs | loaded_count=%s", len(items))
     return items

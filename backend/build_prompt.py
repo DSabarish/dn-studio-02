@@ -1,5 +1,5 @@
 import json
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 
@@ -67,20 +67,23 @@ def _normalize_meetings(meetings):
 
 def _next_run_dir(base_run_dir: Path) -> Path:
     base_run_dir.mkdir(parents=True, exist_ok=True)
-    existing = []
-    for child in base_run_dir.iterdir():
-        if child.is_dir() and child.name.startswith("run_"):
-            suffix = child.name.replace("run_", "", 1)
-            if suffix.isdigit():
-                existing.append(int(suffix))
-    next_idx = (max(existing) + 1) if existing else 1
-    run_dir = base_run_dir / f"run_{next_idx:03d}"
+    base_name = f"run_{datetime.now().strftime('%m%d-%H%M')}"
+    run_dir = base_run_dir / base_name
+    if run_dir.exists():
+        # Same-minute retries: keep the required base format and add a compact suffix.
+        n = 2
+        while True:
+            candidate = base_run_dir / f"{base_name}_{n}"
+            if not candidate.exists():
+                run_dir = candidate
+                break
+            n += 1
     run_dir.mkdir(parents=True, exist_ok=True)
     return run_dir
 
 
 def create_new_run_folder(run_base_dir: Path) -> Path:
-    """Allocate the next `run/run_NNN` folder (used as the single session output directory)."""
+    """Allocate the next `run/run_MMDD-HHMM` folder (used as the single session output directory)."""
     return _next_run_dir(Path(run_base_dir))
 
 
@@ -110,18 +113,12 @@ def _read_transcript_json(transcript_path: Path):
 
 
 def list_bpd_run_dirs(run_base_dir: Path) -> list[Path]:
-    """Sorted `run_NNN` directories under `run_base_dir` (numeric suffix)."""
+    """Sorted `run_*` directories under `run_base_dir` by modified time (newest first)."""
     base = Path(run_base_dir)
     if not base.is_dir():
         return []
-    found = []
-    for child in base.iterdir():
-        if not child.is_dir() or not child.name.startswith("run_"):
-            continue
-        suffix = child.name.replace("run_", "", 1)
-        if suffix.isdigit():
-            found.append((int(suffix), child))
-    return [p for _, p in sorted(found)]
+    found = [child for child in base.iterdir() if child.is_dir() and child.name.startswith("run_")]
+    return sorted(found, key=lambda p: p.stat().st_mtime, reverse=True)
 
 
 def _normalize_schema_json(schema_json):

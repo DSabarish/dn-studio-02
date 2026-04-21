@@ -107,12 +107,14 @@ def _call_llm(model: GenerativeModel, prompt: str, step_name: str) -> dict:
             if attempt < 3:
                 print(f"  [LLM] Invalid JSON on attempt {attempt}; retrying...", flush=True)
                 prompt_to_send = textwrap.dedent(f"""
+
                 Your previous response was invalid JSON and could not be parsed.
                 Return ONLY valid JSON with proper escaping and all strings terminated.
                 Do not include markdown fences and do not add any explanation.
 
                 ORIGINAL TASK:
                 {prompt}
+                
                 """)
                 continue
 

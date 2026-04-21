@@ -1,4 +1,5 @@
 from pathlib import Path
+import logging
 
 from google import genai
 from google.genai import types
@@ -6,6 +7,7 @@ from google.genai import types
 PROJECT_ID = "dn-studio-01"
 LOCATION = "asia-south1"
 MODEL_NAME = "gemini-2.5-flash"
+logger = logging.getLogger("dn_studio.simple_llm")
 
 
 def _strip_markdown_json_fence(text: str) -> str:
@@ -47,6 +49,14 @@ def run_prompt_text(
     if not response_text:
         raise ValueError("Model returned an empty response.")
 
+    logger.info(
+        "LLM call completed | model=%s | prompt_chars=%s | response_chars=%s | temperature=%s | max_output_tokens=%s",
+        MODEL_NAME,
+        len(prompt),
+        len(response_text),
+        float(temperature),
+        int(max_output_tokens),
+    )
     return response_text
 
 

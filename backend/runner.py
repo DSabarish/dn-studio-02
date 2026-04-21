@@ -4,14 +4,14 @@ import io
 import json
 import tempfile
 import zipfile
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import logging
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
 
 from backend.ingest import MEDIA_SUFFIXES, MeetingInput
 
-MAX_PARALLEL_WORKERS = 4
+logger = logging.getLogger("dn_studio.runner")
 
 
 @dataclass
@@ -112,6 +112,7 @@ def process_meetings(
     log,
     progress,
 ) -> MeetingProcessResult:
+    logger.info("process_meetings started | input_count=%s", len(meeting_inputs))
     transcripts_dir = session_base / "transcripts"
     transcripts_dir.mkdir(parents=True, exist_ok=True)
 
@@ -124,6 +125,13 @@ def process_meetings(
     for idx, item in enumerate(meeting_inputs, start=1):
         label = item.source_uri or item.name
         log(f"Preparing {idx}/{total}: `{label}`")
+        logger.info(
+            "Preparing meeting input | index=%s | name=%s | suffix=%s | source_uri=%s",
+            idx,
+            item.name,
+            item.suffix,
+            item.source_uri or "-",
+        )
         progress(idx / max(total, 1))
         try:
             meeting_date_val = meeting_dates.get(idx, date.today())
@@ -167,48 +175,64 @@ def process_meetings(
                     {"meeting_number": idx, "meeting_date": str(meeting_date_val), "transcript_path": str(json_path)}
                 )
             elif item.suffix in MEDIA_SUFFIXES:
+                logger.info("Queued media for transcription | name=%s", item.name)
                 media_items.append((idx, item))
             else:
+                logger.warning("Unsupported file type skipped | name=%s | suffix=%s", item.name, item.suffix)
                 errors.append(f"{item.name}: unsupported file type `{item.suffix}`")
         except Exception as exc:
+            logger.exception("Failed to prepare input | name=%s", item.name)
             errors.append(f"{item.name}: {exc}")
 
     if media_items:
-        workers = max(1, min(MAX_PARALLEL_WORKERS, len(media_items)))
-        log(f"Transcribing {len(media_items)} media file(s) with {workers} worker(s)…")
+        logger.info(
+            "Starting media transcription batch | media_count=%s | mode=sequential",
+            len(media_items),
+        )
+        log(f"Transcribing {len(media_items)} media file(s) sequentially…")
         completed = 0
-        with ThreadPoolExecutor(max_workers=workers) as executor:
-            futures = {executor.submit(_process_media_item, item, transcribe_fn): (meeting_idx, item) for meeting_idx, item in media_items}
-            for future in as_completed(futures):
-                meeting_idx, item = futures[future]
-                completed += 1
-                log(f"Transcribing {completed}/{len(media_items)}: `{item.name}`")
-                try:
-                    processed = future.result()
-                except Exception as exc:
-                    errors.append(f"{item.name}: {exc}")
-                    continue
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                json_name = f"{sanitize_stem(item.name)}_{timestamp}.json"
-                payload = build_transcription_json_payload(
-                    source_video=item.name,
-                    language=processed["language"],
-                    duration=processed["duration"],
-                    segments=processed.get("segments", []),
-                    file_name=json_name,
-                )
-                json_body = json.dumps(payload, ensure_ascii=False, indent=2)
-                json_path = transcripts_dir / json_name
-                json_path.write_text(json_body, encoding="utf-8")
-                processed["json_name"] = json_name
-                processed["json_text"] = json_body
-                outputs.append(processed)
-                meeting_date_val = meeting_dates.get(meeting_idx, date.today())
-                meeting_records.append(
-                    {"meeting_number": meeting_idx, "meeting_date": str(meeting_date_val), "transcript_path": str(json_path)}
-                )
-                progress((total + completed) / max(total + len(media_items), 1))
+        for meeting_idx, item in media_items:
+            completed += 1
+            log(f"Transcribing {completed}/{len(media_items)}: `{item.name}`")
+            try:
+                processed = _process_media_item(item, transcribe_fn)
+            except Exception as exc:
+                logger.exception("Transcription failed | name=%s", item.name)
+                errors.append(f"{item.name}: {exc}")
+                continue
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            json_name = f"{sanitize_stem(item.name)}_{timestamp}.json"
+            payload = build_transcription_json_payload(
+                source_video=item.name,
+                language=processed["language"],
+                duration=processed["duration"],
+                segments=processed.get("segments", []),
+                file_name=json_name,
+            )
+            json_body = json.dumps(payload, ensure_ascii=False, indent=2)
+            json_path = transcripts_dir / json_name
+            json_path.write_text(json_body, encoding="utf-8")
+            processed["json_name"] = json_name
+            processed["json_text"] = json_body
+            outputs.append(processed)
+            meeting_date_val = meeting_dates.get(meeting_idx, date.today())
+            meeting_records.append(
+                {"meeting_number": meeting_idx, "meeting_date": str(meeting_date_val), "transcript_path": str(json_path)}
+            )
+            progress((total + completed) / max(total + len(media_items), 1))
+            logger.info(
+                "Transcription completed | name=%s | duration_seconds=%.3f | segments=%s",
+                item.name,
+                float(processed.get("duration", 0) or 0),
+                len(processed.get("segments", []) or []),
+            )
 
     meeting_records.sort(key=lambda x: x["meeting_number"])
     progress(1.0)
+    logger.info(
+        "process_meetings finished | outputs=%s | meeting_records=%s | errors=%s",
+        len(outputs),
+        len(meeting_records),
+        len(errors),
+    )
     return MeetingProcessResult(outputs=outputs, meeting_records=meeting_records, errors=errors)
