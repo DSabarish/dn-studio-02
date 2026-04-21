@@ -1,0 +1,3 @@
+# Cross-platform: LF in repo for npm manifests
+templates/package.json text eol=lf
+templates/package-lock.json text eol=lf

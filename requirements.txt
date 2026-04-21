@@ -1,0 +1,7 @@
+streamlit
+faster-whisper
+ffmpeg-python
+google-genai
+google-cloud-storage
+pymupdf-layout
+pymupdf4llm
