@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import base64
+import io
 import json
 import subprocess
+import zipfile
 from datetime import date, datetime
 from pathlib import Path
 
@@ -61,8 +63,17 @@ def _meeting_date_key(idx: int) -> str:
     return f"app_meeting_date_{idx}"
 
 
-st.set_page_config(page_title="DN Studio — Full pipeline", layout="wide")
-st.title("DN Studio — one-click pipeline")
+def _build_run_zip(run_path: Path) -> bytes:
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        for file_path in sorted(p for p in run_path.rglob("*") if p.is_file()):
+            zf.write(file_path, file_path.relative_to(run_path))
+    zip_buffer.seek(0)
+    return zip_buffer.getvalue()
+
+
+st.set_page_config(page_title="DN Studio", layout="wide")
+st.title("DN Studio")
 
 st.caption(
     "Add meeting media or transcript JSON, optional context documents, and BPD settings. "
@@ -372,76 +383,24 @@ if run_dir_raw:
         run_key = run_path.name
         st.divider()
         st.subheader("Last run — downloads")
-        st.caption(f"Folder: `{run_path}`")
-        dcols = st.columns(3)
-        r1 = run_path / "r1_schema.json"
-        r2 = run_path / "r2_populated.json"
-        ctx = run_path / "context.md"
+        dcols = st.columns(2)
         docx = run_path / "doctype_doc.docx"
-        if r1.is_file():
-            dcols[0].download_button(
-                "r1_schema.json",
-                data=r1.read_text(encoding="utf-8"),
-                file_name="r1_schema.json",
-                mime="application/json",
-                key=f"app_dl_r1_{run_key}",
-            )
-        if r2.is_file():
-            dcols[1].download_button(
-                "r2_populated.json",
-                data=r2.read_text(encoding="utf-8"),
-                file_name="r2_populated.json",
-                mime="application/json",
-                key=f"app_dl_r2_{run_key}",
-            )
-        if ctx.is_file():
-            dcols[2].download_button(
-                "context.md",
-                data=ctx.read_text(encoding="utf-8"),
-                file_name="context.md",
-                mime="text/markdown",
-                key=f"app_dl_ctx_{run_key}",
-            )
-        if docx.is_file():
-            st.download_button(
-                "doctype_doc.docx",
+
+        run_zip_bytes = _build_run_zip(run_path)
+        run_zip_name = f"{run_path.name}_all_files_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
+        dcols[0].download_button(
+            "Download all run files (ZIP)",
+            data=run_zip_bytes,
+            file_name=run_zip_name,
+            mime="application/zip",
+            key=f"app_dl_run_zip_{run_key}",
+        )
+
+        dcols[1].download_button(
+                "Download BPD.docx",
                 data=docx.read_bytes(),
-                file_name="doctype_doc.docx",
+                file_name="BPD.docx",
                 mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                 key=f"app_dl_docx_{run_key}",
+                disabled=not docx.is_file(),
             )
-
-        transcripts_dir = run_path / "transcripts"
-        if transcripts_dir.is_dir():
-            outs = []
-            for p in sorted(transcripts_dir.glob("*.json")):
-                outs.append(
-                    {
-                        "json_name": p.name,
-                        "json_text": p.read_text(encoding="utf-8"),
-                    }
-                )
-            if outs:
-                zip_buf = build_zip(outs)
-                zip_bytes = zip_buf.getvalue()
-                zip_name = f"transcripts_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
-                trigger_raw = (st.session_state.get("app_trigger_zip_autodl") or "").strip()
-                if trigger_raw and Path(trigger_raw).resolve() == run_path.resolve():
-                    if len(zip_bytes) <= _AUTO_ZIP_DOWNLOAD_MAX_BYTES:
-                        _trigger_browser_zip_download(zip_bytes, zip_name)
-                        st.caption(
-                            "Transcript ZIP should download automatically. "
-                            "If your browser blocked it, use the button below."
-                        )
-                    else:
-                        st.info(
-                            "Transcript ZIP is large — use **All transcripts (ZIP)** below to download."
-                        )
-                    st.session_state.app_trigger_zip_autodl = ""
-                st.download_button(
-                    "All transcripts (ZIP)",
-                    data=zip_bytes,
-                    file_name=zip_name,
-                    mime="application/zip",
-                    key=f"app_dl_zip_{run_key}",
-                )

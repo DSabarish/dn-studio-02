@@ -25,10 +25,12 @@ uv pip install -r requirements.txt
 Run the app:
 
 ```bash
-streamlit run app2.py
+streamlit run app.py
 ```
 
 Open `http://localhost:8501`.
+
+The Meetings section supports both local uploads and optional GCS URIs (`gs://...`) for media or transcript `.json` files.
 
 Set credentials for Vertex (one of):
 
@@ -135,8 +137,8 @@ docker push sabs1010/dn-studio:v4
 
 ## Project layout (short)
 
-- `app2.py` — Streamlit UI (one-click BPD pipeline)
-- `backend/` — prompts, LLM helper, transcription, context building
+- `app.py` — Streamlit UI (one-click BPD pipeline)
+- `backend/` — prompts, LLM helper, ingestion, runner, transcription, context building
 - `prompts/bpd/` — BPD prompt templates
 - `templates/` — Node DOCX generator
 

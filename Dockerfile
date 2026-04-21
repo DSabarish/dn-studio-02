@@ -34,8 +34,8 @@ RUN cd templates && npm install && npm cache clean --force
 # Document that the process listens on 8501 (informational for `docker run -p`).
 EXPOSE 8501
 
-# Default process: start Streamlit UI (app2.py — full pipeline).
+# Default process: start Streamlit UI (app.py — full pipeline).
 # - --server.port=8501: listen port (match EXPOSE / `docker run -p`).
 # - --server.address=0.0.0.0: accept connections from outside the container (not only localhost).
 # - --server.headless=true: no browser auto-open; correct for containers.
-CMD ["streamlit", "run", "app2.py", "--server.port=8501", "--server.address=0.0.0.0", "--server.headless=true"]
+CMD ["streamlit", "run", "app.py", "--server.port=8501", "--server.address=0.0.0.0", "--server.headless=true"]

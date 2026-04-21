@@ -11,6 +11,8 @@ run
 test-files
 code_backup
 outputs
+tmp
+temp
 *.log
 .vscode
 .idea
@@ -24,3 +26,5 @@ gap/*.docx
 *.zip
 test_vertex_out.json
 c.json
+
+quick--cmd.md
