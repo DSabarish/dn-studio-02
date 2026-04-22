@@ -7,6 +7,7 @@ __pycache__
 .env
 .env.*
 !.env.example
+.streamlit/secrets.toml
 run
 test-files
 code_backup

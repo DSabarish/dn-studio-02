@@ -4,7 +4,8 @@ FROM python:3.12-slim-bookworm
 # PYTHONUNBUFFERED: print logs immediately (no stdout buffering) — better for `docker logs`.
 # PIP_NO_CACHE_DIR: do not keep pip download cache in the image layer (smaller image).
 ENV PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1
+    PIP_NO_CACHE_DIR=1 \
+    ASSEMBLYAI_API_KEY=""
 
 # Refresh apt index, install OS packages, then delete apt lists to shrink the layer.
 # - ffmpeg: extract audio from video for Faster Whisper transcription.

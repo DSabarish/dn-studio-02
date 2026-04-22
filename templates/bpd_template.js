@@ -117,10 +117,10 @@ function parseFormat(fmt) {
 // NUMBERING CONFIG — exact indent from JS_template.js
 //   bullet  → left:720, hanging:360  (IDENTICAL to JS_template)
 //   numbered→ left:720, hanging:360  (same indent, decimal format)
-//   40 refs each — counter increments per H3 to ensure list restart
+//   200 refs each — counter increments per H3 to ensure list restart
 // ══════════════════════════════════════════════════════════════════════════════
 var numberingConfig = [];
-for (var bi = 0; bi < 40; bi++) {
+for (var bi = 0; bi < 200; bi++) {
   numberingConfig.push({
     reference: "b" + bi,
     levels: [{
@@ -721,6 +721,7 @@ var doc = new Document({
 Packer.toBuffer(doc).then(function(buf) {
   fs.writeFileSync(outputPath, buf);
   console.log("SUCCESS: " + outputPath);
+  process.exit(0);
 }).catch(function(err) {
   console.error("ERROR:", err.message);
   process.exit(1);

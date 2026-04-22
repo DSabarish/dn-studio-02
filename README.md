@@ -1,6 +1,6 @@
 # DN Studio
 
-Streamlit app for meeting transcription (Faster Whisper), BPD schema/populate prompts, Vertex AI (Gemini), and JSON-to-DOCX export.
+Streamlit app for meeting transcription (Faster Whisper or AssemblyAI), BPD schema/populate prompts, Vertex AI (Gemini), and JSON-to-DOCX export.
 
 ## Prerequisites
 
@@ -31,11 +31,18 @@ streamlit run app.py
 Open `http://localhost:8501`.
 
 The Meetings section supports both local uploads and optional GCS URIs (`gs://...`) for media or transcript `.json` files.
+Transcription engine is selectable in the UI (`Transcription engine` expander above `LLM parameters`): `Whisper (local)` or `AssemblyAI (API)`.
+Meeting processing is strict sequential order: input 1 is processed and saved to transcript JSON before input 2 starts, and so on through input n.
+For media files, the backend first creates an optimized temporary audio derivative (engine-aware), transcribes it with the selected engine, saves JSON, and deletes temporary media before moving to the next item.
 
 Set credentials for Vertex (one of):
 
 - `gcloud auth application-default login` (no key file; good for local dev), or
 - `GOOGLE_APPLICATION_CREDENTIALS` pointing at a service account JSON key (e.g. for Docker mount or servers).
+
+If you choose `AssemblyAI (API)` in the UI, set:
+
+- `ASSEMBLYAI_API_KEY` with your AssemblyAI API key.
 
 ## Node.js (`npm`) for DOCX export
 
@@ -81,6 +88,7 @@ That creates a file on the host. **Mount that file** into the container and poin
 ```bash
 docker run --rm -p 8501:8501 `
   -e GOOGLE_APPLICATION_CREDENTIALS=/run/secrets/application_default_credentials.json `
+  -e ASSEMBLYAI_API_KEY=your_assemblyai_api_key `
   -v "$HOME/.config/gcloud/application_default_credentials.json:/run/secrets/application_default_credentials.json:ro" `
   sabs1010/dn-studio:v4
 ```
@@ -90,6 +98,7 @@ docker run --rm -p 8501:8501 `
 ```powershell
 docker run --rm -p 8501:8501 `
   -e GOOGLE_APPLICATION_CREDENTIALS=/run/secrets/application_default_credentials.json `
+  -e ASSEMBLYAI_API_KEY=your_assemblyai_api_key `
   -v "${env:APPDATA}\gcloud\application_default_credentials.json:/run/secrets/application_default_credentials.json:ro" `
   sabs1010/dn-studio:v4
 ```
@@ -105,6 +114,7 @@ For servers or CI, use a key for **`sa-dn-studio@dn-studio-01.iam.gserviceaccoun
 ```bash
 docker run --rm -p 8501:8501 \
   -e GOOGLE_APPLICATION_CREDENTIALS=/run/secrets/sa.json \
+  -e ASSEMBLYAI_API_KEY=your_assemblyai_api_key \
   -v "$PWD/sa.json:/run/secrets/sa.json:ro" \
   sabs1010/dn-studio:v4
 ```
@@ -114,6 +124,7 @@ docker run --rm -p 8501:8501 \
 ```powershell
 docker run --rm -p 8501:8501 `
   -e GOOGLE_APPLICATION_CREDENTIALS=/run/secrets/sa.json `
+  -e ASSEMBLYAI_API_KEY=your_assemblyai_api_key `
   -v "${PWD}\sa.json:/run/secrets/sa.json:ro" `
   sabs1010/dn-studio:v4
 ```
@@ -160,6 +171,14 @@ gs://meeting-recordings-dn-studio-01/Workshop 1 SAP Utilities Orientation-202510
 gs://meeting-recordings-dn-studio-01/Workshop 2 Organizational Entities & Master data-20251015_093246-Meeting Recording.mp4
 gs://meeting-recordings-dn-studio-01/Workshop 3 Energy Data (Consumption)-20251015_140211-Meeting Recording.mp4
 
+
+Business Process Overview
+Business Process Design
+Business Process Flows
+Business Process Controls
+Business Process Impacts
+Business Process - Very Detailed Flowchart
+Business Process - RICEFW - GAP ANALYSIS
 
 
 ```

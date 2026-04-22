@@ -183,4 +183,23 @@ def convert_json_to_docx(base_dir: Path, r2_path: Path) -> tuple[Path | None, st
     if result.returncode != 0 or not docx_output.is_file():
         details = (result.stderr or result.stdout or "").strip()
         return None, details or "DOCX conversion failed."
+
+    size = docx_output.stat().st_size
+    if size < 100:
+        return None, f"DOCX file is too small ({size} bytes); conversion likely failed. Node output:\n{result.stdout}\n{result.stderr}"
+
+    # .docx must be a ZIP (OOXML). Word shows a generic error if the file is HTML/text/truncated.
+    try:
+        head = docx_output.read_bytes()[:4]
+        if head[:2] != b"PK":
+            return None, (
+                f"Output is not a valid .docx ZIP (missing PK header); got {head!r}. "
+                f"Check Node `docx` in `templates/` (npm install). stderr:\n{result.stderr}"
+            )
+        if not zipfile.is_zipfile(docx_output):
+            return None, f"Output fails zip validation; file may be corrupt. size={size} bytes."
+    except OSError as exc:
+        return None, f"Could not read generated DOCX: {exc}"
+
+    logger.info("DOCX conversion OK | path=%s | size_bytes=%s", docx_output, size)
     return docx_output, ""
