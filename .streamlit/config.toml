@@ -1,0 +1,4 @@
+[server]
+# Allow larger local uploads (MB).
+maxUploadSize = 800
+maxMessageSize = 300
